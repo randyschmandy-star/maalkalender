@@ -312,6 +312,7 @@ body {
 <script type="module">
 import { initializeApp } from "https://www.gstatic.com/firebasejs/10.13.0/firebase-app.js";
 import { getFirestore, doc, onSnapshot, setDoc } from "https://www.gstatic.com/firebasejs/10.13.0/firebase-firestore.js";
+import { getAuth, signInAnonymously, onAuthStateChanged } from "https://www.gstatic.com/firebasejs/10.13.0/firebase-auth.js";
 
 const firebaseConfig = {
   apiKey: "AIzaSyANIgaq9pbu9LABCUS1gXxvVWHt8gqSjAI",
@@ -324,7 +325,10 @@ const firebaseConfig = {
 
 const fbApp = initializeApp(firebaseConfig);
 const db = getFirestore(fbApp);
-const stateRef = doc(db, "app", "state");
+const auth = getAuth(fbApp);
+let stateRef = null;
+let uid = null;
+let authReady = false;
 
 const MANEDER = ["januar","februar","mars","april","mai","juni","juli","august","september","oktober","november","desember"];
 const UKEDAGER_KORT = ["Man","Tir","Ons","Tor","Fre","Lør","Søn"];
@@ -390,28 +394,42 @@ function buildLockScreen() {
 
 const appEl = document.getElementById("app");
 
-onSnapshot(stateRef, (snap) => {
-  if (snap.exists()) {
-    const d = snap.data();
-    state = {
-      goals: Array.isArray(d.goals) ? d.goals : [],
-      completions: d.completions || {},
-      theme: d.theme === "dark" ? "dark" : "light",
-    };
-  } else {
-    state = { goals: [], completions: {}, theme: "light" };
+function startDataListener() {
+  stateRef = doc(db, "users", uid);
+  onSnapshot(stateRef, (snap) => {
+    if (snap.exists()) {
+      const d = snap.data();
+      state = {
+        goals: Array.isArray(d.goals) ? d.goals : [],
+        completions: d.completions || {},
+        theme: d.theme === "dark" ? "dark" : "light",
+      };
+    } else {
+      state = { goals: [], completions: {}, theme: "light" };
+    }
+    loaded = true;
+    render();
+  }, (err) => {
+    console.error("Firestore-feil:", err);
+    loaded = true;
+    render();
+  });
+}
+
+onAuthStateChanged(auth, (user) => {
+  if (user) {
+    uid = user.uid;
+    authReady = true;
+    startDataListener();
+    render();
   }
-  loaded = true;
-  render();
-}, (err) => {
-  console.error("Firestore-feil:", err);
-  loaded = true;
-  render();
 });
+signInAnonymously(auth).catch((err) => console.error("Innloggingsfeil:", err));
 
 async function persist(next) {
   state = next;
   render();
+  if (!stateRef) return;
   try {
     await setDoc(stateRef, next);
   } catch (e) {
@@ -615,7 +633,7 @@ function render() {
     if (input) input.focus();
     return;
   }
-  if (!loaded) {
+  if (!authReady || !loaded) {
     appEl.innerHTML = `<div class="gt-loading">Henter mål …</div>`;
     return;
   }
