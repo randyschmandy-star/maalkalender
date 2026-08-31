@@ -199,6 +199,23 @@ body {
   margin-bottom: 10px;
 }
 .gt-manage-label { font-size: 12px; color: var(--muted); margin: 0 0 8px; }
+.gt-help-title {
+  font-family: 'Fraunces', serif;
+  font-size: 16px; font-weight: 500;
+  margin: 0 0 4px;
+}
+.gt-help-heading {
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--ink);
+  margin: 14px 0 3px;
+}
+.gt-help-body {
+  font-size: 13px;
+  color: var(--muted);
+  line-height: 1.45;
+  margin: 0;
+}
 .gt-goal-manage-list { list-style: none; margin: 0 0 10px; padding: 0; }
 .gt-goal-manage-list li {
   display: flex; align-items: center; justify-content: space-between;
@@ -417,6 +434,7 @@ let viewDate = (() => { const d = new Date(); d.setDate(1); return d; })();
 let selectedDate = new Date();
 let showManage = false;
 let showAccount = false;
+let showHelp = false;
 let accountMessage = "";
 let accountError = "";
 let newGoalWeekdays = [];
@@ -625,9 +643,39 @@ function buildHeader() {
         <h1 class="gt-title">${MANEDER[viewDate.getMonth()]} <span class="gt-year">${viewDate.getFullYear()}</span></h1>
         <button class="gt-nav-btn" data-action="next-month" aria-label="Neste måned">›</button>
       </div>
-      <span class="gt-header-spacer"></span>
+      <button class="gt-theme-btn" data-action="toggle-help" aria-label="Bruksanvisning">?</button>
     </header>
     <div class="gt-weekdays">${UKEDAGER_KORT.map(d => `<span>${d}</span>`).join("")}</div>
+  `;
+}
+
+function buildHelp() {
+  if (!showHelp) return "";
+  return `
+    <div class="gt-manage">
+      <p class="gt-help-title">Slik bruker du Målkalenderen</p>
+
+      <p class="gt-help-heading">Kalenderen</p>
+      <p class="gt-help-body">Klikk på en dato for å se og redigere målene for akkurat den dagen. Mål kan være gjentakende eller knyttet til én bestemt dag.</p>
+
+      <p class="gt-help-heading">Krysse av mål</p>
+      <p class="gt-help-body">Klikk på selve boksen ved siden av et mål for å krysse det av. Klikk på teksten i stedet for å åpne et notatfelt der du kan skrive en kommentar.</p>
+
+      <p class="gt-help-heading">Streak</p>
+      <p class="gt-help-body">Flammen øverst viser hvor mange dager på rad du har fullført alle målene dine.</p>
+
+      <p class="gt-help-heading">Forskyve et mål</p>
+      <p class="gt-help-body">Er det et mål du ikke rekker? Trykk på pilen til høyre ved målet for å flytte det til neste dag, uten å miste streaken din.</p>
+
+      <p class="gt-help-heading">Sammendrag</p>
+      <p class="gt-help-body">Nederst i appen ser du en liste over alle faste mål og hvor mange ganger hvert av dem er krysset av totalt.</p>
+
+      <p class="gt-help-heading">Mørk modus</p>
+      <p class="gt-help-body">Måne/sol-ikonet øverst bytter mellom lys og mørk fargedrakt.</p>
+
+      <p class="gt-help-heading">Sikre kontoen din</p>
+      <p class="gt-help-body">Trykk «Sikre data» og lag et brukernavn og passord for å kunne logge inn og hente frem de samme målene på en annen telefon eller etter at nettleserdata er tømt.</p>
+    </div>
   `;
 }
 
@@ -858,7 +906,7 @@ function buildStats() {
     .join("");
   return `
     <div class="gt-stats">
-      <p class="gt-manage-label">Oversikt</p>
+      <p class="gt-manage-label">Sammendrag</p>
       <ul class="gt-stats-list">${rows}</ul>
     </div>
   `;
@@ -871,7 +919,7 @@ function render() {
     appEl.innerHTML = `<div class="gt-loading">Henter mål …</div>`;
     return;
   }
-  appEl.innerHTML = buildHeader() + buildGridHtml() + buildTodayBar() + buildManage() + buildAccount() + buildDetail() + buildStats();
+  appEl.innerHTML = buildHeader() + buildHelp() + buildGridHtml() + buildTodayBar() + buildManage() + buildAccount() + buildDetail() + buildStats();
 }
 
 appEl.addEventListener("click", (e) => {
@@ -881,9 +929,10 @@ appEl.addEventListener("click", (e) => {
   if (action === "prev-month") { viewDate = new Date(viewDate.getFullYear(), viewDate.getMonth() - 1, 1); render(); }
   else if (action === "next-month") { viewDate = new Date(viewDate.getFullYear(), viewDate.getMonth() + 1, 1); render(); }
   else if (action === "toggle-theme") toggleTheme();
+  else if (action === "toggle-help") { showHelp = !showHelp; showManage = false; showAccount = false; render(); }
   else if (action === "select-day") { const [y,m,d] = btn.dataset.date.split("-").map(Number); selectedDate = new Date(y, m-1, d); render(); }
-  else if (action === "toggle-manage") { showManage = !showManage; showAccount = false; render(); }
-  else if (action === "toggle-account") { showAccount = !showAccount; showManage = false; accountMessage = ""; accountError = ""; render(); }
+  else if (action === "toggle-manage") { showManage = !showManage; showAccount = false; showHelp = false; render(); }
+  else if (action === "toggle-account") { showAccount = !showAccount; showManage = false; showHelp = false; accountMessage = ""; accountError = ""; render(); }
   else if (action === "secure-account") {
     const username = document.getElementById("account-username");
     const password = document.getElementById("account-password");
