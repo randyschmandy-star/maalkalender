@@ -213,8 +213,22 @@ body {
 .gt-link-btn {
   background: none; border: none; color: var(--accent);
   font-size: 13px; font-weight: 600; cursor: pointer; padding: 0;
-  margin-left: auto;
 }
+.gt-today-actions { display: flex; align-items: center; gap: 12px; margin-left: auto; }
+.gt-account-input {
+  width: 100%; font-size: 14px; padding: 8px 10px;
+  border: 1px solid var(--line); border-radius: 8px;
+  font-family: 'Inter', sans-serif; background: var(--bg);
+  color: var(--ink); margin-bottom: 6px;
+}
+.gt-account-input:focus { outline: 2px solid var(--accent); outline-offset: 1px; }
+.gt-account-btn {
+  width: 100%; height: 36px; border-radius: 8px;
+  margin-bottom: 4px; font-size: 13px; font-weight: 600;
+  background: var(--accent); color: white; border: none;
+  cursor: pointer; font-family: 'Inter', sans-serif;
+}
+.gt-account-success { color: var(--accent); font-size: 13px; margin: 8px 0 0; }
 
 .gt-manage {
   background: var(--surface);
@@ -307,6 +321,40 @@ body {
   font-family: 'Inter', sans-serif;
   color: var(--ink);
 }
+.gt-checkbox-btn {
+  background: none; border: none; padding: 8px 4px 8px 4px;
+  cursor: pointer; display: flex; align-items: center; flex-shrink: 0;
+}
+.gt-goal-text-btn {
+  display: flex; align-items: center; gap: 6px;
+  flex: 1; min-width: 0;
+  background: none; border: none;
+  padding: 8px 4px; cursor: pointer; text-align: left;
+  font-family: 'Inter', sans-serif;
+  color: var(--ink);
+  border-radius: 8px;
+}
+.gt-goal-text-btn:hover { background: var(--bg); }
+.gt-comment-dot {
+  width: 5px; height: 5px; border-radius: 50%;
+  background: var(--warm); flex-shrink: 0;
+}
+.gt-comment-wrap { padding: 0 4px 8px; }
+.gt-comment-input {
+  width: 100%; min-height: 56px;
+  font-size: 13px; padding: 8px 10px;
+  border: 1px solid var(--line); border-radius: 8px;
+  font-family: 'Inter', sans-serif; background: var(--bg);
+  color: var(--ink); resize: vertical;
+}
+.gt-comment-input:focus { outline: 2px solid var(--accent); outline-offset: 1px; }
+.gt-row-away { opacity: 0.7; }
+.gt-goal-label-muted {
+  display: flex; align-items: center; gap: 8px;
+  font-size: 14px; color: var(--muted);
+  text-decoration: line-through;
+  padding: 8px 4px;
+}
 .gt-checkbox {
   width: 20px; height: 20px; border-radius: 6px;
   border: 1.5px solid var(--muted);
@@ -344,7 +392,7 @@ body {
 <script type="module">
 import { initializeApp } from "https://www.gstatic.com/firebasejs/10.13.0/firebase-app.js";
 import { getFirestore, doc, onSnapshot, setDoc } from "https://www.gstatic.com/firebasejs/10.13.0/firebase-firestore.js";
-import { getAuth, signInAnonymously, onAuthStateChanged } from "https://www.gstatic.com/firebasejs/10.13.0/firebase-auth.js";
+import { getAuth, signInAnonymously, onAuthStateChanged, EmailAuthProvider, linkWithCredential, signInWithEmailAndPassword } from "https://www.gstatic.com/firebasejs/10.13.0/firebase-auth.js";
 
 const firebaseConfig = {
   apiKey: "AIzaSyANIgaq9pbu9LABCUS1gXxvVWHt8gqSjAI",
@@ -402,12 +450,17 @@ function escapeHtml(str) {
     .replace(/"/g,"&quot;").replace(/'/g,"&#39;");
 }
 
-let state = { goals: [], completions: {}, theme: "light", postponements: [] };
+let state = { goals: [], completions: {}, theme: "light", postponements: [], comments: {} };
 let loaded = false;
 let viewDate = (() => { const d = new Date(); d.setDate(1); return d; })();
 let selectedDate = new Date();
 let showManage = false;
+let showAccount = false;
+let accountMessage = "";
+let accountError = "";
 let newGoalWeekdays = [];
+let openCommentKey = null;
+function commentKey(dateKey, goalId) { return `${dateKey}::${goalId}`; }
 
 const PASSCODE = "0211";
 const LOCK_KEY = "mal-kalender-unlocked";
@@ -441,9 +494,13 @@ function buildLockScreen() {
 
 const appEl = document.getElementById("app");
 
+let unsubscribeSnapshot = null;
+
 function startDataListener() {
+  if (unsubscribeSnapshot) { unsubscribeSnapshot(); unsubscribeSnapshot = null; }
   stateRef = doc(db, "users", uid);
-  onSnapshot(stateRef, (snap) => {
+  loaded = false;
+  unsubscribeSnapshot = onSnapshot(stateRef, (snap) => {
     if (snap.exists()) {
       const d = snap.data();
       state = {
@@ -451,9 +508,10 @@ function startDataListener() {
         completions: d.completions || {},
         theme: d.theme === "dark" ? "dark" : "light",
         postponements: Array.isArray(d.postponements) ? d.postponements : [],
+        comments: d.comments || {},
       };
     } else {
-      state = { goals: [], completions: {}, theme: "light", postponements: [] };
+      state = { goals: [], completions: {}, theme: "light", postponements: [], comments: {} };
     }
     loaded = true;
     render();
@@ -473,6 +531,41 @@ onAuthStateChanged(auth, (user) => {
   }
 });
 signInAnonymously(auth).catch((err) => console.error("Innloggingsfeil:", err));
+
+function translateAuthError(e) {
+  const code = e && e.code;
+  if (code === "auth/email-already-in-use") return "Denne e-postadressen er allerede sikret av en konto. Prøv å logge inn i stedet.";
+  if (code === "auth/weak-password") return "Passordet må være minst 6 tegn.";
+  if (code === "auth/invalid-email") return "Ugyldig e-postadresse.";
+  if (code === "auth/wrong-password" || code === "auth/invalid-credential") return "Feil e-post eller passord.";
+  if (code === "auth/user-not-found") return "Fant ingen konto med denne e-postadressen.";
+  return "Noe gikk galt. Prøv igjen.";
+}
+
+async function secureAccount(email, password) {
+  accountError = "";
+  accountMessage = "";
+  try {
+    const credential = EmailAuthProvider.credential(email, password);
+    await linkWithCredential(auth.currentUser, credential);
+    accountMessage = "Kontoen er sikret. Bruk denne e-posten og passordet for å hente målene dine på en annen enhet.";
+  } catch (e) {
+    accountError = translateAuthError(e);
+  }
+  render();
+}
+
+async function loginExisting(email, password) {
+  accountError = "";
+  accountMessage = "";
+  try {
+    await signInWithEmailAndPassword(auth, email, password);
+    accountMessage = "Innlogget. Målene dine lastes inn.";
+  } catch (e) {
+    accountError = translateAuthError(e);
+  }
+  render();
+}
 
 async function persist(next) {
   state = next;
@@ -624,7 +717,43 @@ function buildTodayBar() {
     <div class="gt-today-bar">
       <span>I dag: <strong>${done} av ${total}</strong> mål</span>
       <span class="gt-streak">🔥 ${streak} ${streak === 1 ? "dag" : "dager"}</span>
-      <button class="gt-link-btn" data-action="toggle-manage">${showManage ? "Lukk" : "Rediger mål"}</button>
+      <div class="gt-today-actions">
+        <button class="gt-link-btn" data-action="toggle-manage">${showManage ? "Lukk" : "Rediger mål"}</button>
+        <button class="gt-link-btn" data-action="toggle-account">${showAccount ? "Lukk" : "Sikre data"}</button>
+      </div>
+    </div>
+  `;
+}
+
+function buildAccount() {
+  if (!showAccount) return "";
+  const user = auth.currentUser;
+  const isSecured = user && !user.isAnonymous;
+  const msg = accountMessage ? `<p class="gt-account-success">${escapeHtml(accountMessage)}</p>` : "";
+  const err = accountError ? `<p class="gt-lock-error">${escapeHtml(accountError)}</p>` : "";
+
+  if (isSecured) {
+    return `
+      <div class="gt-manage">
+        <p class="gt-manage-label">Konto</p>
+        <p class="gt-empty-hint">Sikret med ${escapeHtml(user.email || "")}. Logg inn med denne e-posten og passordet på andre enheter for å hente disse målene.</p>
+        ${msg}${err}
+      </div>
+    `;
+  }
+
+  return `
+    <div class="gt-manage">
+      <p class="gt-manage-label">Sikre kontoen din</p>
+      <p class="gt-empty-hint">Legg til e-post og lag et passord, så mister du ikke målene dine selv om du bytter telefon eller tømmer nettleserdata.</p>
+      <input id="account-email" class="gt-account-input" type="email" placeholder="E-post" autocomplete="email" />
+      <input id="account-password" class="gt-account-input" type="password" placeholder="Passord (minst 6 tegn)" autocomplete="new-password" />
+      <button class="gt-account-btn" data-action="secure-account">Sikre konto</button>
+      <p class="gt-section-label">Har du allerede en sikret konto (fra en annen enhet)?</p>
+      <input id="login-email" class="gt-account-input" type="email" placeholder="E-post" autocomplete="email" />
+      <input id="login-password" class="gt-account-input" type="password" placeholder="Passord" autocomplete="current-password" />
+      <button class="gt-account-btn" data-action="login-existing">Logg inn</button>
+      ${msg}${err}
     </div>
   `;
 }
@@ -672,6 +801,9 @@ function renderGoalRow(g, dateKey, doneIds, opts) {
   const done = doneIds.includes(g.id);
   const cbStyle = done ? `background:${g.color};border-color:${g.color}` : `border-color:${g.color}`;
   const isPostponed = opts.showPostpone && isPostponedAway(dateKey, g.id);
+  const cKey = commentKey(dateKey, g.id);
+  const hasComment = !!(state.comments[cKey] && state.comments[cKey].trim());
+  const commentOpen = openCommentKey === cKey;
   let extra = "";
   if (opts.showPostpone) {
     extra += `<button class="gt-icon-btn${isPostponed ? " gt-icon-btn-active" : ""}" data-action="toggle-postpone" data-goal="${g.id}" data-date-key="${dateKey}" aria-label="Forskyv til i morgen" title="${isPostponed ? "Forskjøvet til i morgen – trykk for å angre" : "Forskyv til i morgen"}">→</button>`;
@@ -682,15 +814,24 @@ function renderGoalRow(g, dateKey, doneIds, opts) {
   if (opts.showDelete) {
     extra += `<button class="gt-icon-btn" data-action="delete-goal" data-goal="${g.id}" aria-label="Slett">✕</button>`;
   }
+  const commentBox = commentOpen
+    ? `<div class="gt-comment-wrap">
+        <textarea class="gt-comment-input" data-comment-goal="${g.id}" data-comment-date="${dateKey}" placeholder="Notat for denne dagen …">${escapeHtml(state.comments[cKey] || "")}</textarea>
+      </div>`
+    : "";
   return `
     <li>
       <div class="gt-check-row gt-check-row-once${done ? " gt-check-row-done" : ""}">
-        <button class="gt-check-row-inner" data-action="toggle-goal" data-goal="${g.id}" data-date-key="${dateKey}">
+        <button class="gt-checkbox-btn" data-action="toggle-goal" data-goal="${g.id}" data-date-key="${dateKey}" aria-label="Merk som gjort">
           <span class="gt-checkbox" style="${cbStyle}">${done ? "✓" : ""}</span>
+        </button>
+        <button class="gt-goal-text-btn" data-action="toggle-comment" data-goal="${g.id}" data-date-key="${dateKey}">
           <span class="gt-goal-text">${escapeHtml(g.text)}</span>
+          ${hasComment ? `<span class="gt-comment-dot" title="Har notat"></span>` : ""}
         </button>
         ${extra}
       </div>
+      ${commentBox}
     </li>
   `;
 }
@@ -701,11 +842,12 @@ function buildDetail() {
   const dailyGoals = state.goals.filter(g => g.type === "daily" && isNativelyScheduled(g, selectedKey) && !isPostponedAway(selectedKey, g.id));
   const onceGoals = state.goals.filter(g => g.type === "once" && isNativelyScheduled(g, selectedKey) && !isPostponedAway(selectedKey, g.id));
   const pushedGoals = postponedInto(selectedKey).filter(g => !isNativelyScheduled(g, selectedKey));
+  const postponedAwayGoals = state.goals.filter(g => isNativelyScheduled(g, selectedKey) && isPostponedAway(selectedKey, g.id));
 
   const dateLabel = `${UKEDAGER_LANG[selectedDate.getDay()]} ${selectedDate.getDate()}. ${MANEDER[selectedDate.getMonth()]}`;
 
   let body = "";
-  if (dailyGoals.length === 0 && onceGoals.length === 0 && pushedGoals.length === 0) {
+  if (dailyGoals.length === 0 && onceGoals.length === 0 && pushedGoals.length === 0 && postponedAwayGoals.length === 0) {
     body = `<p class="gt-empty-hint">Du har ingen mål denne dagen ennå. Legg til faste mål under «Rediger mål», eller et engangsmål for denne dagen nedenfor.</p>`;
   } else {
     if (dailyGoals.length > 0) {
@@ -718,6 +860,16 @@ function buildDetail() {
     if (pushedGoals.length > 0) {
       body += `<p class="gt-section-label">Forskjøvet hit fra i går</p>
       <ul class="gt-goal-list">${pushedGoals.map(g => renderGoalRow(g, selectedKey, selectedDoneIds, { showCancelPostpone: true })).join("")}</ul>`;
+    }
+    if (postponedAwayGoals.length > 0) {
+      body += `<p class="gt-section-label">Forskjøvet bort fra denne dagen</p>
+      <ul class="gt-goal-list">${postponedAwayGoals.map(g => `
+        <li>
+          <div class="gt-check-row gt-check-row-once gt-row-away">
+            <span class="gt-goal-label-muted"><span class="gt-color-dot" style="background:${g.color}"></span>${escapeHtml(g.text)}</span>
+            <button class="gt-icon-btn gt-icon-btn-active" data-action="toggle-postpone" data-goal="${g.id}" data-date-key="${selectedKey}" aria-label="Angre forskyvning">Angre</button>
+          </div>
+        </li>`).join("")}</ul>`;
     }
   }
 
@@ -742,8 +894,9 @@ function countCompletionsForGoal(goalId) {
 }
 
 function buildStats() {
-  if (state.goals.length === 0) return "";
-  const rows = state.goals
+  const recurringGoals = state.goals.filter(g => g.type === "daily");
+  if (recurringGoals.length === 0) return "";
+  const rows = recurringGoals
     .map(g => ({ g, count: countCompletionsForGoal(g.id) }))
     .sort((a, b) => b.count - a.count)
     .map(({ g, count }) => `
@@ -773,7 +926,7 @@ function render() {
     appEl.innerHTML = `<div class="gt-loading">Henter mål …</div>`;
     return;
   }
-  appEl.innerHTML = buildHeader() + buildGridHtml() + buildTodayBar() + buildManage() + buildDetail() + buildStats();
+  appEl.innerHTML = buildHeader() + buildGridHtml() + buildTodayBar() + buildManage() + buildAccount() + buildDetail() + buildStats();
 }
 
 appEl.addEventListener("click", (e) => {
@@ -785,7 +938,18 @@ appEl.addEventListener("click", (e) => {
   else if (action === "next-month") { viewDate = new Date(viewDate.getFullYear(), viewDate.getMonth() + 1, 1); render(); }
   else if (action === "toggle-theme") toggleTheme();
   else if (action === "select-day") { const [y,m,d] = btn.dataset.date.split("-").map(Number); selectedDate = new Date(y, m-1, d); render(); }
-  else if (action === "toggle-manage") { showManage = !showManage; render(); }
+  else if (action === "toggle-manage") { showManage = !showManage; showAccount = false; render(); }
+  else if (action === "toggle-account") { showAccount = !showAccount; showManage = false; accountMessage = ""; accountError = ""; render(); }
+  else if (action === "secure-account") {
+    const email = document.getElementById("account-email");
+    const password = document.getElementById("account-password");
+    if (email && password && email.value.trim() && password.value) secureAccount(email.value.trim(), password.value);
+  }
+  else if (action === "login-existing") {
+    const email = document.getElementById("login-email");
+    const password = document.getElementById("login-password");
+    if (email && password && email.value.trim() && password.value) loginExisting(email.value.trim(), password.value);
+  }
   else if (action === "toggle-goal") toggleGoal(btn.dataset.dateKey, btn.dataset.goal);
   else if (action === "delete-goal") deleteGoal(btn.dataset.goal);
   else if (action === "add-daily-goal") {
@@ -811,10 +975,36 @@ appEl.addEventListener("click", (e) => {
   }
   else if (action === "toggle-postpone") togglePostpone(btn.dataset.goal, btn.dataset.dateKey);
   else if (action === "cancel-postpone") cancelPostpone(btn.dataset.goal, btn.dataset.dateKey);
+  else if (action === "toggle-comment") {
+    const key = commentKey(btn.dataset.dateKey, btn.dataset.goal);
+    openCommentKey = openCommentKey === key ? null : key;
+    render();
+    if (openCommentKey === key) {
+      const ta = document.querySelector(`textarea[data-comment-goal="${btn.dataset.goal}"][data-comment-date="${btn.dataset.dateKey}"]`);
+      if (ta) { ta.focus(); ta.setSelectionRange(ta.value.length, ta.value.length); }
+    }
+  }
+});
+
+appEl.addEventListener("focusout", (e) => {
+  const ta = e.target.closest("textarea[data-comment-goal]");
+  if (!ta) return;
+  const key = commentKey(ta.dataset.commentDate, ta.dataset.commentGoal);
+  const value = ta.value;
+  const current = state.comments[key] || "";
+  if (value === current) return;
+  const nextComments = { ...state.comments };
+  if (value.trim() === "") {
+    delete nextComments[key];
+  } else {
+    nextComments[key] = value;
+  }
+  persist({ ...state, comments: nextComments });
 });
 
 appEl.addEventListener("keydown", (e) => {
   if (e.key !== "Enter") return;
+  if (e.target.tagName === "TEXTAREA") return;
   if (e.target.id === "lock-input") attemptUnlock();
   else if (e.target.id === "new-daily-input") addDailyGoal(e.target.value);
   else if (e.target.id === "new-once-input") addOnceGoal(e.target.value, toKey(selectedDate));
