@@ -319,6 +319,23 @@ body {
   text-decoration: line-through;
   color: var(--muted);
 }
+
+.gt-stats {
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  padding: 12px;
+  margin-top: 10px;
+}
+.gt-stats-list { list-style: none; margin: 0; padding: 0; }
+.gt-stats-list li {
+  display: flex; align-items: center; justify-content: space-between;
+  padding: 6px 0; font-size: 14px;
+  border-bottom: 1px solid var(--line);
+}
+.gt-stats-list li:last-child { border-bottom: none; }
+.gt-stat-label { display: flex; align-items: center; gap: 8px; }
+.gt-stat-count { font-weight: 600; color: var(--accent); font-size: 13px; }
 </style>
 </head>
 <body>
@@ -716,6 +733,33 @@ function buildDetail() {
   `;
 }
 
+function countCompletionsForGoal(goalId) {
+  let count = 0;
+  for (const dateKey in state.completions) {
+    if ((state.completions[dateKey] || []).includes(goalId)) count += 1;
+  }
+  return count;
+}
+
+function buildStats() {
+  if (state.goals.length === 0) return "";
+  const rows = state.goals
+    .map(g => ({ g, count: countCompletionsForGoal(g.id) }))
+    .sort((a, b) => b.count - a.count)
+    .map(({ g, count }) => `
+      <li>
+        <span class="gt-stat-label"><span class="gt-color-dot" style="background:${g.color}"></span>${escapeHtml(g.text)}</span>
+        <span class="gt-stat-count">${count}</span>
+      </li>`)
+    .join("");
+  return `
+    <div class="gt-stats">
+      <p class="gt-manage-label">Oversikt</p>
+      <ul class="gt-stats-list">${rows}</ul>
+    </div>
+  `;
+}
+
 function render() {
   document.documentElement.classList.toggle("dark", state.theme === "dark");
   appEl.className = "gt-root" + (state.theme === "dark" ? " gt-dark" : "");
@@ -729,7 +773,7 @@ function render() {
     appEl.innerHTML = `<div class="gt-loading">Henter mål …</div>`;
     return;
   }
-  appEl.innerHTML = buildHeader() + buildGridHtml() + buildTodayBar() + buildManage() + buildDetail();
+  appEl.innerHTML = buildHeader() + buildGridHtml() + buildTodayBar() + buildManage() + buildDetail() + buildStats();
 }
 
 appEl.addEventListener("click", (e) => {
