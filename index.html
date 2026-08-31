@@ -238,6 +238,21 @@ body {
   display: flex; padding: 4px; font-size: 13px;
 }
 .gt-icon-btn:hover { color: var(--warm); }
+.gt-icon-btn-active { color: var(--accent); }
+.gt-manage-hint { font-size: 11px; color: var(--muted); margin: 10px 0 6px; }
+.gt-day-chips { display: flex; gap: 4px; flex-wrap: wrap; }
+.gt-day-chip {
+  font-size: 11px;
+  padding: 5px 8px;
+  border-radius: 999px;
+  border: 1px solid var(--line);
+  background: var(--bg);
+  color: var(--ink);
+  cursor: pointer;
+  font-family: 'Inter', sans-serif;
+}
+.gt-day-chip-active { background: var(--accent); border-color: var(--accent); color: white; }
+.gt-goal-sub { display: block; font-size: 11px; color: var(--muted); }
 .gt-add-row { display: flex; gap: 6px; }
 .gt-add-row input {
   flex: 1; font-size: 14px; padding: 8px 10px;
@@ -334,9 +349,23 @@ const MANEDER = ["januar","februar","mars","april","mai","juni","juli","august",
 const UKEDAGER_KORT = ["Man","Tir","Ons","Tor","Fre","Lør","Søn"];
 const UKEDAGER_LANG = ["søndag","mandag","tirsdag","onsdag","torsdag","fredag","lørdag"];
 const PALETTE = ["#3F6B54","#C97A46","#5B7DB1","#B15B7D","#8A9A3F","#4F8A8B","#B1855B","#7D5BB1"];
+const WEEKDAY_ORDER = [1,2,3,4,5,6,0]; // Man..Søn i JS sin getDay()-rekkefølge, matcher UKEDAGER_KORT
 
 function toKey(date) {
   return `${date.getFullYear()}-${String(date.getMonth()+1).padStart(2,"0")}-${String(date.getDate()).padStart(2,"0")}`;
+}
+function fromKey(key) {
+  const [y, m, d] = key.split("-").map(Number);
+  return new Date(y, m - 1, d);
+}
+function nextDayKey(dateKey) {
+  const d = fromKey(dateKey);
+  d.setDate(d.getDate() + 1);
+  return toKey(d);
+}
+function weekdayLabel(weekdays) {
+  const sorted = [...weekdays].sort((a, b) => WEEKDAY_ORDER.indexOf(a) - WEEKDAY_ORDER.indexOf(b));
+  return sorted.map((d) => UKEDAGER_KORT[WEEKDAY_ORDER.indexOf(d)]).join(", ");
 }
 function sameDay(a,b) {
   return a.getFullYear()===b.getFullYear() && a.getMonth()===b.getMonth() && a.getDate()===b.getDate();
@@ -356,11 +385,12 @@ function escapeHtml(str) {
     .replace(/"/g,"&quot;").replace(/'/g,"&#39;");
 }
 
-let state = { goals: [], completions: {}, theme: "light" };
+let state = { goals: [], completions: {}, theme: "light", postponements: [] };
 let loaded = false;
 let viewDate = (() => { const d = new Date(); d.setDate(1); return d; })();
 let selectedDate = new Date();
 let showManage = false;
+let newGoalWeekdays = [];
 
 const PASSCODE = "0211";
 const LOCK_KEY = "mal-kalender-unlocked";
@@ -403,9 +433,10 @@ function startDataListener() {
         goals: Array.isArray(d.goals) ? d.goals : [],
         completions: d.completions || {},
         theme: d.theme === "dark" ? "dark" : "light",
+        postponements: Array.isArray(d.postponements) ? d.postponements : [],
       };
     } else {
-      state = { goals: [], completions: {}, theme: "light" };
+      state = { goals: [], completions: {}, theme: "light", postponements: [] };
     }
     loaded = true;
     render();
@@ -437,8 +468,27 @@ async function persist(next) {
   }
 }
 
+function isNativelyScheduled(g, dateKey) {
+  if (g.type === "once") return g.date === dateKey;
+  if (g.type === "daily") {
+    if (!g.weekdays || g.weekdays.length === 0) return true;
+    return g.weekdays.includes(fromKey(dateKey).getDay());
+  }
+  return false;
+}
+function isPostponedAway(dateKey, goalId) {
+  return state.postponements.some(p => p.goalId === goalId && p.from === dateKey);
+}
+function postponedInto(dateKey) {
+  return state.postponements
+    .filter(p => p.to === dateKey)
+    .map(p => state.goals.find(g => g.id === p.goalId))
+    .filter(Boolean);
+}
 function goalsForDate(dateKey) {
-  return state.goals.filter(g => g.type === "daily" || (g.type === "once" && g.date === dateKey));
+  const base = state.goals.filter(g => isNativelyScheduled(g, dateKey) && !isPostponedAway(dateKey, g.id));
+  const extra = postponedInto(dateKey).filter(g => !base.some(b => b.id === g.id));
+  return [...base, ...extra];
 }
 function doneIdsFor(dateKey) { return state.completions[dateKey] || []; }
 function countFor(dateKey) {
@@ -458,7 +508,9 @@ function addDailyGoal(text) {
   const t = text.trim();
   if (!t) return;
   const goal = { id: `g${Date.now()}`, text: t, color: nextColor(), type: "daily" };
+  if (newGoalWeekdays.length > 0) goal.weekdays = [...newGoalWeekdays];
   persist({ ...state, goals: [...state.goals, goal] });
+  newGoalWeekdays = [];
 }
 function addOnceGoal(text, dateKey) {
   const t = text.trim();
@@ -471,6 +523,18 @@ function deleteGoal(id) {
 }
 function toggleTheme() {
   persist({ ...state, theme: state.theme === "dark" ? "light" : "dark" });
+}
+function togglePostpone(goalId, dateKey) {
+  const existing = state.postponements.find(p => p.goalId === goalId && p.from === dateKey);
+  if (existing) {
+    persist({ ...state, postponements: state.postponements.filter(p => p !== existing) });
+  } else {
+    const toDateKey = nextDayKey(dateKey);
+    persist({ ...state, postponements: [...state.postponements, { goalId, from: dateKey, to: toDateKey }] });
+  }
+}
+function cancelPostpone(goalId, toDateKey) {
+  persist({ ...state, postponements: state.postponements.filter(p => !(p.goalId === goalId && p.to === toDateKey)) });
 }
 
 function computeStreak() {
@@ -552,63 +616,91 @@ function buildManage() {
   if (!showManage) return "";
   const dailyGoals = state.goals.filter(g => g.type === "daily");
   const list = dailyGoals.length === 0
-    ? `<p class="gt-empty-hint">Ingen daglige mål lagt til ennå.</p>`
-    : `<ul class="gt-goal-manage-list">${dailyGoals.map(g => `
+    ? `<p class="gt-empty-hint">Ingen faste mål lagt til ennå.</p>`
+    : `<ul class="gt-goal-manage-list">${dailyGoals.map(g => {
+        const sub = g.weekdays && g.weekdays.length ? weekdayLabel(g.weekdays) : "Hver dag";
+        return `
         <li>
-          <span class="gt-goal-label"><span class="gt-color-dot" style="background:${g.color}"></span>${escapeHtml(g.text)}</span>
+          <span class="gt-goal-label">
+            <span class="gt-color-dot" style="background:${g.color}"></span>
+            <span>
+              ${escapeHtml(g.text)}
+              <span class="gt-goal-sub">${sub}</span>
+            </span>
+          </span>
           <button class="gt-icon-btn" data-action="delete-goal" data-goal="${g.id}" aria-label="Slett">✕</button>
-        </li>`).join("")}</ul>`;
+        </li>`;
+      }).join("")}</ul>`;
+
+  const dayChips = WEEKDAY_ORDER.map((day, i) => {
+    const active = newGoalWeekdays.includes(day);
+    return `<button class="gt-day-chip${active ? " gt-day-chip-active" : ""}" data-action="toggle-weekday" data-day="${day}">${UKEDAGER_KORT[i]}</button>`;
+  }).join("");
+
   return `
     <div class="gt-manage">
-      <p class="gt-manage-label">Daglige mål (gjelder alle dager)</p>
+      <p class="gt-manage-label">Faste mål</p>
       ${list}
       <div class="gt-add-row">
         <input id="new-daily-input" placeholder="Nytt mål, f.eks. Drikk 2 liter vann" />
         <button class="gt-add-btn" data-action="add-daily-goal" aria-label="Legg til mål">+</button>
       </div>
+      <p class="gt-manage-hint">Ukedager (la stå tomt for hver dag):</p>
+      <div class="gt-day-chips">${dayChips}</div>
     </div>
+  `;
+}
+
+function renderGoalRow(g, dateKey, doneIds, opts) {
+  const done = doneIds.includes(g.id);
+  const cbStyle = done ? `background:${g.color};border-color:${g.color}` : `border-color:${g.color}`;
+  const isPostponed = opts.showPostpone && isPostponedAway(dateKey, g.id);
+  let extra = "";
+  if (opts.showPostpone) {
+    extra += `<button class="gt-icon-btn${isPostponed ? " gt-icon-btn-active" : ""}" data-action="toggle-postpone" data-goal="${g.id}" data-date-key="${dateKey}" aria-label="Forskyv til i morgen" title="${isPostponed ? "Forskjøvet til i morgen – trykk for å angre" : "Forskyv til i morgen"}">→</button>`;
+  }
+  if (opts.showCancelPostpone) {
+    extra += `<button class="gt-icon-btn" data-action="cancel-postpone" data-goal="${g.id}" data-date-key="${dateKey}" aria-label="Angre forskyvning" title="Fjern fra denne dagen">✕</button>`;
+  }
+  if (opts.showDelete) {
+    extra += `<button class="gt-icon-btn" data-action="delete-goal" data-goal="${g.id}" aria-label="Slett">✕</button>`;
+  }
+  return `
+    <li>
+      <div class="gt-check-row gt-check-row-once${done ? " gt-check-row-done" : ""}">
+        <button class="gt-check-row-inner" data-action="toggle-goal" data-goal="${g.id}" data-date-key="${dateKey}">
+          <span class="gt-checkbox" style="${cbStyle}">${done ? "✓" : ""}</span>
+          <span class="gt-goal-text">${escapeHtml(g.text)}</span>
+        </button>
+        ${extra}
+      </div>
+    </li>
   `;
 }
 
 function buildDetail() {
   const selectedKey = toKey(selectedDate);
   const selectedDoneIds = doneIdsFor(selectedKey);
-  const dailyGoals = state.goals.filter(g => g.type === "daily");
-  const onceGoals = state.goals.filter(g => g.type === "once" && g.date === selectedKey);
+  const dailyGoals = state.goals.filter(g => g.type === "daily" && isNativelyScheduled(g, selectedKey) && !isPostponedAway(selectedKey, g.id));
+  const onceGoals = state.goals.filter(g => g.type === "once" && isNativelyScheduled(g, selectedKey) && !isPostponedAway(selectedKey, g.id));
+  const pushedGoals = postponedInto(selectedKey).filter(g => !isNativelyScheduled(g, selectedKey));
 
   const dateLabel = `${UKEDAGER_LANG[selectedDate.getDay()]} ${selectedDate.getDate()}. ${MANEDER[selectedDate.getMonth()]}`;
 
   let body = "";
-  if (dailyGoals.length === 0 && onceGoals.length === 0) {
-    body = `<p class="gt-empty-hint">Du har ingen mål ennå. Legg til daglige mål under «Rediger mål», eller et engangsmål for denne dagen nedenfor.</p>`;
+  if (dailyGoals.length === 0 && onceGoals.length === 0 && pushedGoals.length === 0) {
+    body = `<p class="gt-empty-hint">Du har ingen mål denne dagen ennå. Legg til faste mål under «Rediger mål», eller et engangsmål for denne dagen nedenfor.</p>`;
   } else {
     if (dailyGoals.length > 0) {
-      body += `<ul class="gt-goal-list">${dailyGoals.map(g => {
-        const done = selectedDoneIds.includes(g.id);
-        const cbStyle = done ? `background:${g.color};border-color:${g.color}` : `border-color:${g.color}`;
-        return `<li>
-          <button class="gt-check-row${done ? " gt-check-row-done" : ""}" data-action="toggle-goal" data-goal="${g.id}" data-date-key="${selectedKey}">
-            <span class="gt-checkbox" style="${cbStyle}">${done ? "✓" : ""}</span>
-            <span class="gt-goal-text">${escapeHtml(g.text)}</span>
-          </button>
-        </li>`;
-      }).join("")}</ul>`;
+      body += `<ul class="gt-goal-list">${dailyGoals.map(g => renderGoalRow(g, selectedKey, selectedDoneIds, { showPostpone: true })).join("")}</ul>`;
     }
     if (onceGoals.length > 0) {
       body += `<p class="gt-section-label">Mål for denne dagen</p>
-      <ul class="gt-goal-list">${onceGoals.map(g => {
-        const done = selectedDoneIds.includes(g.id);
-        const cbStyle = done ? `background:${g.color};border-color:${g.color}` : `border-color:${g.color}`;
-        return `<li>
-          <div class="gt-check-row gt-check-row-once${done ? " gt-check-row-done" : ""}">
-            <button class="gt-check-row-inner" data-action="toggle-goal" data-goal="${g.id}" data-date-key="${selectedKey}">
-              <span class="gt-checkbox" style="${cbStyle}">${done ? "✓" : ""}</span>
-              <span class="gt-goal-text">${escapeHtml(g.text)}</span>
-            </button>
-            <button class="gt-icon-btn" data-action="delete-goal" data-goal="${g.id}" aria-label="Slett">✕</button>
-          </div>
-        </li>`;
-      }).join("")}</ul>`;
+      <ul class="gt-goal-list">${onceGoals.map(g => renderGoalRow(g, selectedKey, selectedDoneIds, { showPostpone: true, showDelete: true })).join("")}</ul>`;
+    }
+    if (pushedGoals.length > 0) {
+      body += `<p class="gt-section-label">Forskjøvet hit fra i går</p>
+      <ul class="gt-goal-list">${pushedGoals.map(g => renderGoalRow(g, selectedKey, selectedDoneIds, { showCancelPostpone: true })).join("")}</ul>`;
     }
   }
 
@@ -660,6 +752,21 @@ appEl.addEventListener("click", (e) => {
     const input = document.getElementById("new-once-input");
     if (input) addOnceGoal(input.value, toKey(selectedDate));
   }
+  else if (action === "toggle-weekday") {
+    const day = Number(btn.dataset.day);
+    const input = document.getElementById("new-daily-input");
+    const draft = input ? input.value : "";
+    newGoalWeekdays = newGoalWeekdays.includes(day) ? newGoalWeekdays.filter(d => d !== day) : [...newGoalWeekdays, day];
+    render();
+    const newInput = document.getElementById("new-daily-input");
+    if (newInput) {
+      newInput.value = draft;
+      newInput.focus();
+      newInput.setSelectionRange(draft.length, draft.length);
+    }
+  }
+  else if (action === "toggle-postpone") togglePostpone(btn.dataset.goal, btn.dataset.dateKey);
+  else if (action === "cancel-postpone") cancelPostpone(btn.dataset.goal, btn.dataset.dateKey);
 });
 
 appEl.addEventListener("keydown", (e) => {
