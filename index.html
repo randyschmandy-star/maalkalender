@@ -459,9 +459,10 @@ onAuthStateChanged(auth, (user) => {
     authReady = true;
     startDataListener();
     render();
+  } else {
+    signInAnonymously(auth).catch((err) => console.error("Innloggingsfeil:", err));
   }
 });
-signInAnonymously(auth).catch((err) => console.error("Innloggingsfeil:", err));
 
 const USERNAME_DOMAIN = "@maalkalender.lokal";
 function usernameToInternalEmail(username) {
