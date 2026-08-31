@@ -53,6 +53,51 @@ body {
   min-height: 200px; color: var(--muted); font-size: 14px;
 }
 
+.gt-lock {
+  display: flex; flex-direction: column; align-items: center;
+  text-align: center;
+  padding: 40px 12px;
+}
+.gt-lock-title {
+  font-family: 'Fraunces', serif;
+  font-size: 22px; font-weight: 500;
+  margin: 0 0 4px;
+}
+.gt-lock-sub {
+  font-size: 13px; color: var(--muted);
+  margin: 0 0 20px;
+}
+.gt-lock-input {
+  width: 140px;
+  font-size: 24px;
+  letter-spacing: 10px;
+  text-align: center;
+  padding: 10px 0 10px 10px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: var(--surface);
+  color: var(--ink);
+  font-family: 'Inter', sans-serif;
+  margin-bottom: 14px;
+}
+.gt-lock-input:focus { outline: 2px solid var(--accent); outline-offset: 1px; }
+.gt-lock-error {
+  color: var(--warm);
+  font-size: 13px;
+  margin: -6px 0 14px;
+}
+.gt-lock-btn {
+  background: var(--accent);
+  color: white;
+  border: none;
+  border-radius: 9px;
+  padding: 10px 22px;
+  font-size: 14px;
+  font-weight: 600;
+  cursor: pointer;
+  font-family: 'Inter', sans-serif;
+}
+
 .gt-header {
   display: flex; align-items: center; justify-content: space-between;
   margin-bottom: 14px;
@@ -313,6 +358,36 @@ let viewDate = (() => { const d = new Date(); d.setDate(1); return d; })();
 let selectedDate = new Date();
 let showManage = false;
 
+const PASSCODE = "0211";
+const LOCK_KEY = "mal-kalender-unlocked";
+let unlocked = localStorage.getItem(LOCK_KEY) === "1";
+let lockError = false;
+
+function attemptUnlock() {
+  const input = document.getElementById("lock-input");
+  if (!input) return;
+  if (input.value.trim() === PASSCODE) {
+    localStorage.setItem(LOCK_KEY, "1");
+    unlocked = true;
+    lockError = false;
+  } else {
+    lockError = true;
+  }
+  render();
+}
+
+function buildLockScreen() {
+  return `
+    <div class="gt-lock">
+      <p class="gt-lock-title">Målkalender</p>
+      <p class="gt-lock-sub">Skriv inn koden for å åpne</p>
+      <input id="lock-input" class="gt-lock-input" type="password" inputmode="numeric" pattern="[0-9]*" maxlength="4" autocomplete="off" />
+      ${lockError ? `<p class="gt-lock-error">Feil kode, prøv igjen.</p>` : ""}
+      <button class="gt-lock-btn" data-action="unlock">Lås opp</button>
+    </div>
+  `;
+}
+
 const appEl = document.getElementById("app");
 
 onSnapshot(stateRef, (snap) => {
@@ -534,6 +609,12 @@ function buildDetail() {
 function render() {
   document.documentElement.classList.toggle("dark", state.theme === "dark");
   appEl.className = "gt-root" + (state.theme === "dark" ? " gt-dark" : "");
+  if (!unlocked) {
+    appEl.innerHTML = buildLockScreen();
+    const input = document.getElementById("lock-input");
+    if (input) input.focus();
+    return;
+  }
   if (!loaded) {
     appEl.innerHTML = `<div class="gt-loading">Henter mål …</div>`;
     return;
@@ -545,6 +626,7 @@ appEl.addEventListener("click", (e) => {
   const btn = e.target.closest("[data-action]");
   if (!btn) return;
   const action = btn.dataset.action;
+  if (action === "unlock") { attemptUnlock(); return; }
   if (action === "prev-month") { viewDate = new Date(viewDate.getFullYear(), viewDate.getMonth() - 1, 1); render(); }
   else if (action === "next-month") { viewDate = new Date(viewDate.getFullYear(), viewDate.getMonth() + 1, 1); render(); }
   else if (action === "toggle-theme") toggleTheme();
@@ -564,7 +646,8 @@ appEl.addEventListener("click", (e) => {
 
 appEl.addEventListener("keydown", (e) => {
   if (e.key !== "Enter") return;
-  if (e.target.id === "new-daily-input") addDailyGoal(e.target.value);
+  if (e.target.id === "lock-input") attemptUnlock();
+  else if (e.target.id === "new-daily-input") addDailyGoal(e.target.value);
   else if (e.target.id === "new-once-input") addOnceGoal(e.target.value, toKey(selectedDate));
 });
 
