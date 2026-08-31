@@ -463,34 +463,51 @@ onAuthStateChanged(auth, (user) => {
 });
 signInAnonymously(auth).catch((err) => console.error("Innloggingsfeil:", err));
 
+const USERNAME_DOMAIN = "@maalkalender.lokal";
+function usernameToInternalEmail(username) {
+  return username.trim().toLowerCase().replace(/[^a-z0-9_.-]/g, "") + USERNAME_DOMAIN;
+}
+
 function translateAuthError(e) {
   const code = e && e.code;
-  if (code === "auth/email-already-in-use") return "Denne e-postadressen er allerede sikret av en konto. Prøv å logge inn i stedet.";
+  if (code === "auth/email-already-in-use") return "Dette brukernavnet er allerede tatt. Prøv å logge inn i stedet, eller velg et annet.";
   if (code === "auth/weak-password") return "Passordet må være minst 6 tegn.";
-  if (code === "auth/invalid-email") return "Ugyldig e-postadresse.";
-  if (code === "auth/wrong-password" || code === "auth/invalid-credential") return "Feil e-post eller passord.";
-  if (code === "auth/user-not-found") return "Fant ingen konto med denne e-postadressen.";
+  if (code === "auth/invalid-email") return "Ugyldig brukernavn – bruk kun bokstaver og tall.";
+  if (code === "auth/wrong-password" || code === "auth/invalid-credential") return "Feil brukernavn eller passord.";
+  if (code === "auth/user-not-found") return "Fant ingen konto med dette brukernavnet.";
   return "Noe gikk galt. Prøv igjen.";
 }
 
-async function secureAccount(email, password) {
+async function secureAccount(username, password) {
   accountError = "";
   accountMessage = "";
+  const clean = username.trim().toLowerCase().replace(/[^a-z0-9_.-]/g, "");
+  if (!clean) {
+    accountError = "Skriv inn et brukernavn (bokstaver og tall).";
+    render();
+    return;
+  }
   try {
-    const credential = EmailAuthProvider.credential(email, password);
+    const credential = EmailAuthProvider.credential(clean + USERNAME_DOMAIN, password);
     await linkWithCredential(auth.currentUser, credential);
-    accountMessage = "Kontoen er sikret. Bruk denne e-posten og passordet for å hente målene dine på en annen enhet.";
+    accountMessage = "Kontoen er sikret. Bruk dette brukernavnet og passordet for å hente målene dine på en annen enhet.";
   } catch (e) {
     accountError = translateAuthError(e);
   }
   render();
 }
 
-async function loginExisting(email, password) {
+async function loginExisting(username, password) {
   accountError = "";
   accountMessage = "";
+  const clean = username.trim().toLowerCase().replace(/[^a-z0-9_.-]/g, "");
+  if (!clean) {
+    accountError = "Skriv inn et brukernavn (bokstaver og tall).";
+    render();
+    return;
+  }
   try {
-    await signInWithEmailAndPassword(auth, email, password);
+    await signInWithEmailAndPassword(auth, clean + USERNAME_DOMAIN, password);
     accountMessage = "Innlogget. Målene dine lastes inn.";
   } catch (e) {
     accountError = translateAuthError(e);
@@ -660,6 +677,7 @@ function buildAccount() {
   if (!showAccount) return "";
   const user = auth.currentUser;
   const isSecured = user && !user.isAnonymous;
+  const displayUsername = user && user.email ? user.email.replace(USERNAME_DOMAIN, "") : "";
   const msg = accountMessage ? `<p class="gt-account-success">${escapeHtml(accountMessage)}</p>` : "";
   const err = accountError ? `<p class="gt-lock-error">${escapeHtml(accountError)}</p>` : "";
 
@@ -667,7 +685,7 @@ function buildAccount() {
     return `
       <div class="gt-manage">
         <p class="gt-manage-label">Konto</p>
-        <p class="gt-empty-hint">Sikret med ${escapeHtml(user.email || "")}. Logg inn med denne e-posten og passordet på andre enheter for å hente disse målene.</p>
+        <p class="gt-empty-hint">Sikret som «${escapeHtml(displayUsername)}». Logg inn med dette brukernavnet og passordet på andre enheter for å hente disse målene.</p>
         ${msg}${err}
       </div>
     `;
@@ -676,12 +694,12 @@ function buildAccount() {
   return `
     <div class="gt-manage">
       <p class="gt-manage-label">Sikre kontoen din</p>
-      <p class="gt-empty-hint">Legg til e-post og lag et passord, så mister du ikke målene dine selv om du bytter telefon eller tømmer nettleserdata.</p>
-      <input id="account-email" class="gt-account-input" type="email" placeholder="E-post" autocomplete="email" />
+      <p class="gt-empty-hint">Lag et brukernavn og et passord, så mister du ikke målene dine selv om du bytter telefon eller tømmer nettleserdata.</p>
+      <input id="account-username" class="gt-account-input" type="text" placeholder="Brukernavn" autocomplete="username" />
       <input id="account-password" class="gt-account-input" type="password" placeholder="Passord (minst 6 tegn)" autocomplete="new-password" />
       <button class="gt-account-btn" data-action="secure-account">Sikre konto</button>
       <p class="gt-section-label">Har du allerede en sikret konto (fra en annen enhet)?</p>
-      <input id="login-email" class="gt-account-input" type="email" placeholder="E-post" autocomplete="email" />
+      <input id="login-username" class="gt-account-input" type="text" placeholder="Brukernavn" autocomplete="username" />
       <input id="login-password" class="gt-account-input" type="password" placeholder="Passord" autocomplete="current-password" />
       <button class="gt-account-btn" data-action="login-existing">Logg inn</button>
       ${msg}${err}
@@ -865,14 +883,14 @@ appEl.addEventListener("click", (e) => {
   else if (action === "toggle-manage") { showManage = !showManage; showAccount = false; render(); }
   else if (action === "toggle-account") { showAccount = !showAccount; showManage = false; accountMessage = ""; accountError = ""; render(); }
   else if (action === "secure-account") {
-    const email = document.getElementById("account-email");
+    const username = document.getElementById("account-username");
     const password = document.getElementById("account-password");
-    if (email && password && email.value.trim() && password.value) secureAccount(email.value.trim(), password.value);
+    if (username && password && username.value.trim() && password.value) secureAccount(username.value.trim(), password.value);
   }
   else if (action === "login-existing") {
-    const email = document.getElementById("login-email");
+    const username = document.getElementById("login-username");
     const password = document.getElementById("login-password");
-    if (email && password && email.value.trim() && password.value) loginExisting(email.value.trim(), password.value);
+    if (username && password && username.value.trim() && password.value) loginExisting(username.value.trim(), password.value);
   }
   else if (action === "toggle-goal") toggleGoal(btn.dataset.dateKey, btn.dataset.goal);
   else if (action === "delete-goal") deleteGoal(btn.dataset.goal);
