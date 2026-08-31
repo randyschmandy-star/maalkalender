@@ -529,6 +529,7 @@ async function persist(next) {
 function isNativelyScheduled(g, dateKey) {
   if (g.type === "once") return g.date === dateKey;
   if (g.type === "daily") {
+    if (g.createdAt && dateKey < g.createdAt) return false;
     if (!g.weekdays || g.weekdays.length === 0) return true;
     return g.weekdays.includes(fromKey(dateKey).getDay());
   }
@@ -565,7 +566,7 @@ function toggleGoal(dateKey, goalId) {
 function addDailyGoal(text) {
   const t = text.trim();
   if (!t) return;
-  const goal = { id: `g${Date.now()}`, text: t, color: nextColor(), type: "daily" };
+  const goal = { id: `g${Date.now()}`, text: t, color: nextColor(), type: "daily", createdAt: toKey(new Date()) };
   if (newGoalWeekdays.length > 0) goal.weekdays = [...newGoalWeekdays];
   persist({ ...state, goals: [...state.goals, goal] });
   newGoalWeekdays = [];
