@@ -465,7 +465,9 @@ signInAnonymously(auth).catch((err) => console.error("Innloggingsfeil:", err));
 
 const USERNAME_DOMAIN = "@maalkalender.lokal";
 function usernameToInternalEmail(username) {
-  return username.trim().toLowerCase().replace(/[^a-z0-9_.-]/g, "") + USERNAME_DOMAIN;
+  const trimmed = username.trim().toLowerCase();
+  if (trimmed.includes("@")) return trimmed; // eksisterende konto sikret med ekte e-post – brukes som den er
+  return trimmed.replace(/[^a-z0-9_.-]/g, "") + USERNAME_DOMAIN;
 }
 
 function translateAuthError(e) {
@@ -481,14 +483,13 @@ function translateAuthError(e) {
 async function secureAccount(username, password) {
   accountError = "";
   accountMessage = "";
-  const clean = username.trim().toLowerCase().replace(/[^a-z0-9_.-]/g, "");
-  if (!clean) {
+  if (!username.trim()) {
     accountError = "Skriv inn et brukernavn (bokstaver og tall).";
     render();
     return;
   }
   try {
-    const credential = EmailAuthProvider.credential(clean + USERNAME_DOMAIN, password);
+    const credential = EmailAuthProvider.credential(usernameToInternalEmail(username), password);
     await linkWithCredential(auth.currentUser, credential);
     accountMessage = "Kontoen er sikret. Bruk dette brukernavnet og passordet for å hente målene dine på en annen enhet.";
   } catch (e) {
@@ -500,14 +501,13 @@ async function secureAccount(username, password) {
 async function loginExisting(username, password) {
   accountError = "";
   accountMessage = "";
-  const clean = username.trim().toLowerCase().replace(/[^a-z0-9_.-]/g, "");
-  if (!clean) {
+  if (!username.trim()) {
     accountError = "Skriv inn et brukernavn (bokstaver og tall).";
     render();
     return;
   }
   try {
-    await signInWithEmailAndPassword(auth, clean + USERNAME_DOMAIN, password);
+    await signInWithEmailAndPassword(auth, usernameToInternalEmail(username), password);
     accountMessage = "Innlogget. Målene dine lastes inn.";
   } catch (e) {
     accountError = translateAuthError(e);
