@@ -97,7 +97,6 @@ body {
   cursor: pointer;
   font-size: 15px;
 }
-.gt-nav-btn:hover { background: var(--accent-soft); }
 
 .gt-theme-btn {
   width: 28px; height: 28px;
@@ -110,7 +109,6 @@ body {
   flex-shrink: 0;
   font-size: 13px;
 }
-.gt-theme-btn:hover { background: var(--accent-soft); }
 
 .gt-weekdays {
   display: grid;
@@ -146,6 +144,7 @@ body {
   font-family: 'Inter', sans-serif;
   color: var(--ink);
   width: 100%;
+  transition: transform 0.15s ease, box-shadow 0.15s ease, border-color 0.15s ease, background 0.15s ease;
 }
 .gt-cell-out { opacity: 0.35; cursor: default; border-style: dashed; }
 .gt-cell-today { border-color: var(--warm); border-width: 1.5px; }
@@ -243,7 +242,6 @@ body {
   background: none; border: none; color: var(--muted); cursor: pointer;
   display: flex; padding: 4px; font-size: 13px;
 }
-.gt-icon-btn:hover { color: var(--warm); }
 .gt-icon-btn-active { color: var(--accent); }
 .gt-manage-hint { font-size: 11px; color: var(--muted); margin: 10px 0 6px; }
 .gt-day-chips { display: flex; gap: 4px; flex-wrap: wrap; }
@@ -395,6 +393,54 @@ body {
 .gt-select:disabled { opacity: 0.5; }
 .gt-edit-actions { display: flex; gap: 8px; }
 .gt-btn-secondary { background: var(--surface); color: var(--ink); border: 1px solid var(--line); }
+
+/* Panelåpning: "Rediger mål", "Varsler" og "Sikre data" glir ned og fades inn ovenfra når de åpnes. */
+@keyframes gt-panel-open {
+  from { opacity: 0; transform: translateY(-14px) scaleY(0.96); }
+  to { opacity: 1; transform: translateY(0) scaleY(1); }
+}
+.gt-panel-animate {
+  transform-origin: top;
+  animation: gt-panel-open 0.28s ease-out;
+}
+@keyframes gt-panel-close {
+  from { opacity: 1; transform: translateY(0) scaleY(1); }
+  to { opacity: 0; transform: translateY(-14px) scaleY(0.96); }
+}
+.gt-panel-closing {
+  transform-origin: top;
+  animation: gt-panel-close 0.28s ease-in forwards;
+  pointer-events: none;
+}
+
+/* Flamme-"dans" når alle dagens mål er fullført. */
+.gt-flame { display: inline-block; }
+@keyframes gt-flame-dance {
+  0% { transform: scale(1) rotate(0deg); }
+  20% { transform: scale(1.45) rotate(-10deg); }
+  40% { transform: scale(1.3) rotate(10deg); }
+  60% { transform: scale(1.35) rotate(-6deg); }
+  80% { transform: scale(1.15) rotate(4deg); }
+  100% { transform: scale(1) rotate(0deg); }
+}
+.gt-flame-dance { animation: gt-flame-dance 0.7s ease-in-out; }
+
+/* Mouseover-effekter kun for enheter med ekte mus/peker (unngår "fastlåst" hover på mobil/touch). */
+@media (hover: hover) and (pointer: fine) {
+  .gt-nav-btn:hover { background: var(--accent-soft); }
+  .gt-theme-btn:hover { background: var(--accent-soft); }
+  .gt-icon-btn:hover { color: var(--warm); }
+  .gt-link-btn:hover { text-decoration: underline; }
+  .gt-add-btn:hover { filter: brightness(1.1); }
+  .gt-account-btn:hover { filter: brightness(1.1); }
+  .gt-day-chip:hover { border-color: var(--accent); }
+  .gt-checkbox-btn:hover .gt-checkbox { border-color: var(--warm); }
+  .gt-cell:not(.gt-cell-out):hover {
+    border-color: var(--accent);
+    transform: translateY(-2px);
+    box-shadow: 0 4px 10px rgba(0,0,0,0.12);
+  }
+}
 </style>
 </head>
 <body>
@@ -402,7 +448,7 @@ body {
 
 <script type="module">
 import { initializeApp } from "https://www.gstatic.com/firebasejs/10.13.0/firebase-app.js";
-import { getFirestore, doc, onSnapshot, setDoc, arrayUnion } from "https://www.gstatic.com/firebasejs/10.13.0/firebase-firestore.js";
+import { getFirestore, initializeFirestore, persistentLocalCache, persistentSingleTabManager, doc, onSnapshot, setDoc, arrayUnion } from "https://www.gstatic.com/firebasejs/10.13.0/firebase-firestore.js";
 import { getAuth, signInAnonymously, onAuthStateChanged, EmailAuthProvider, linkWithCredential, signInWithEmailAndPassword } from "https://www.gstatic.com/firebasejs/10.13.0/firebase-auth.js";
 import { getMessaging, getToken, onMessage } from "https://www.gstatic.com/firebasejs/10.13.0/firebase-messaging.js";
 
@@ -420,7 +466,22 @@ const VAPID_KEY = "BLPSLb3XYj6dT9MGTDR_SqzRd_a346elkWc5zhY1j_28-IkVb0sFAfOM80FVq
 const DEFAULT_NOTIFY_TIME = "09:00";
 
 const fbApp = initializeApp(firebaseConfig);
-const db = getFirestore(fbApp);
+// Varig lokal buffer (IndexedDB): sørger for at en avkrysning som skjer rett
+// før appen lukkes (typisk når man krysser av det siste målet og går videre)
+// blir liggende i en lagringskø og sendt til Firestore neste gang appen
+// åpnes, i stedet for å gå tapt fordi selve nettverkskallet ikke rakk å
+// fullføre. Dette var trolig årsaken til at streaken ikke telte riktig
+// over flere dager. Faller tilbake til vanlig minne-cache dersom
+// IndexedDB ikke er tilgjengelig (f.eks. i enkelte private nettlesermodus).
+let db;
+try {
+  db = initializeFirestore(fbApp, {
+    localCache: persistentLocalCache({ tabManager: persistentSingleTabManager() }),
+  });
+} catch (e) {
+  console.warn("Kunne ikke aktivere varig lokal buffer, bruker minnebasert cache:", e);
+  db = getFirestore(fbApp);
+}
 const auth = getAuth(fbApp);
 let stateRef = null;
 let uid = null;
@@ -473,10 +534,7 @@ let state = { goals: [], completions: {}, theme: "light", postponements: [], com
 let loaded = false;
 let viewDate = (() => { const d = new Date(); d.setDate(1); return d; })();
 let selectedDate = new Date();
-let showManage = false;
-let showAccount = false;
-let showHelp = false;
-let showNotify = false;
+let activePanel = null; // "manage" | "notify" | "account" | "help" | null – kun ett av disse panelene kan være åpent om gangen
 let accountMessage = "";
 let accountError = "";
 let newGoalWeekdays = [];
@@ -484,6 +542,39 @@ let openCommentKey = null;
 let editingGoalId = null;
 let notifyBusy = false;
 let notifyPermissionError = "";
+let justOpenedPanel = null; // "manage" | "notify" | "account" | null – styrer åpne-animasjonen, brukes kun for ett render
+let closingPanel = null; // "manage" | "notify" | "account" | null – styrer lukke-animasjonen mens panelet fortsatt fjernes fra DOM
+let panelToken = 0; // økes ved hvert panel-trykk, brukes til å avbryte utdaterte lukke-timeouts
+let flameAnimateUntil = 0; // tidsstempel (ms): flammen "danser" i alle render frem til Date.now() passerer denne
+
+function setActivePanel(name) {
+  const current = activePanel;
+  const target = current === name ? null : name; // trykk på samme knapp igjen = lukk
+
+  // Sideeffekter knyttet til selve knappe-trykket, uavhengig av om det åpner eller lukker.
+  if (name === "manage") editingGoalId = null;
+  if (name === "account") { accountMessage = ""; accountError = ""; }
+  if (name === "notify") notifyPermissionError = "";
+
+  closingPanel = (current && current !== target) ? current : null;
+  activePanel = target;
+  justOpenedPanel = target;
+
+  const token = ++panelToken;
+  render();
+  justOpenedPanel = null;
+
+  if (closingPanel) {
+    setTimeout(() => {
+      if (panelToken === token) { closingPanel = null; render(); }
+    }, 280);
+  }
+}
+function panelAnimClass(name) {
+  if (justOpenedPanel === name) return " gt-panel-animate";
+  if (closingPanel === name) return " gt-panel-closing";
+  return "";
+}
 function commentKey(dateKey, goalId) { return `${dateKey}::${goalId}`; }
 
 const appEl = document.getElementById("app");
@@ -626,7 +717,14 @@ function nextColor() { return PALETTE[state.goals.length % PALETTE.length]; }
 
 function toggleGoal(dateKey, goalId) {
   const current = doneIdsFor(dateKey);
-  const nextArr = current.includes(goalId) ? current.filter(id => id !== goalId) : [...current, goalId];
+  const wasChecked = current.includes(goalId);
+  const nextArr = wasChecked ? current.filter(id => id !== goalId) : [...current, goalId];
+  if (!wasChecked && dateKey === toKey(new Date())) {
+    // Sjekker av et mål for i dag – dans med flammen dersom dette var det siste gjenstående målet.
+    const goals = goalsForDate(dateKey);
+    const willBeDone = nextArr.filter(id => goals.some(g => g.id === id)).length;
+    if (goals.length > 0 && willBeDone === goals.length) flameAnimateUntil = Date.now() + 700;
+  }
   persist({ ...state, completions: { ...state.completions, [dateKey]: nextArr } });
 }
 function addDailyGoal(text, notifyEnabled, notifyTime) {
@@ -774,7 +872,7 @@ function buildHeader() {
 }
 
 function buildHelp() {
-  if (!showHelp) return "";
+  if (activePanel !== "help") return "";
   return `
     <div class="gt-manage">
       <p class="gt-help-title">Slik bruker du Målkalenderen</p>
@@ -838,21 +936,22 @@ function buildTodayBar() {
   const todayKey = toKey(new Date());
   const { done, total } = countFor(todayKey);
   const streak = computeStreak();
+  const flameDance = Date.now() < flameAnimateUntil; // sant i alle render-kall innenfor dans-vinduet, se toggleGoal()
   return `
     <div class="gt-today-bar">
       <span><strong>${done} av ${total}</strong> mål</span>
-      <span class="gt-streak">🔥 ${streak} ${streak === 1 ? "dag" : "dager"}</span>
+      <span class="gt-streak"><span class="gt-flame${flameDance ? " gt-flame-dance" : ""}">🔥</span> ${streak} ${streak === 1 ? "dag" : "dager"}</span>
       <div class="gt-today-actions">
-        <button class="gt-link-btn" data-action="toggle-manage">${showManage ? "Lukk" : "Rediger mål"}</button>
-        <button class="gt-link-btn" data-action="toggle-notify">${showNotify ? "Lukk" : "Varsler"}</button>
-        <button class="gt-link-btn" data-action="toggle-account">${showAccount ? "Lukk" : "Sikre data"}</button>
+        <button class="gt-link-btn" data-action="toggle-manage">${activePanel === "manage" ? "Lukk" : "Rediger mål"}</button>
+        <button class="gt-link-btn" data-action="toggle-notify">${activePanel === "notify" ? "Lukk" : "Varsler"}</button>
+        <button class="gt-link-btn" data-action="toggle-account">${activePanel === "account" ? "Lukk" : "Sikre data"}</button>
       </div>
     </div>
   `;
 }
 
 function buildNotifySettings() {
-  if (!showNotify) return "";
+  if (activePanel !== "notify" && closingPanel !== "notify") return "";
   const perm = notifyPermissionState();
   const hasToken = deviceHasNotifyToken();
   const statusLabel = perm === "granted" && hasToken
@@ -861,7 +960,7 @@ function buildNotifySettings() {
       ? "blokkert i nettleseren/systemet"
       : "ikke aktivert på denne enheten";
   return `
-    <div class="gt-manage">
+    <div class="gt-manage${panelAnimClass("notify")}">
       <p class="gt-manage-label">Varsler</p>
       <p class="gt-empty-hint">Skru på varsler på denne enheten for å bli minnet på mål du har valgt å varsles om under «Rediger mål» eller når du legger til et nytt mål.</p>
       <p class="gt-empty-hint" style="margin-top:-4px;">Status: ${statusLabel}</p>
@@ -873,7 +972,7 @@ function buildNotifySettings() {
 }
 
 function buildAccount() {
-  if (!showAccount) return "";
+  if (activePanel !== "account" && closingPanel !== "account") return "";
   const user = auth.currentUser;
   const isSecured = user && !user.isAnonymous;
   const displayUsername = user && user.email ? user.email.replace(USERNAME_DOMAIN, "") : "";
@@ -882,7 +981,7 @@ function buildAccount() {
 
   if (isSecured) {
     return `
-      <div class="gt-manage">
+      <div class="gt-manage${panelAnimClass("account")}">
         <p class="gt-manage-label">Konto</p>
         <p class="gt-empty-hint">Sikret som «${escapeHtml(displayUsername)}». Logg inn med dette brukernavnet og passordet på andre enheter for å hente disse målene.</p>
         ${msg}${err}
@@ -891,7 +990,7 @@ function buildAccount() {
   }
 
   return `
-    <div class="gt-manage">
+    <div class="gt-manage${panelAnimClass("account")}">
       <p class="gt-manage-label">Sikre kontoen din</p>
       <p class="gt-empty-hint">Lag et brukernavn og et passord, så mister du ikke målene dine selv om du bytter telefon eller tømmer nettleserdata.</p>
       <input id="account-username" class="gt-account-input" type="text" placeholder="Brukernavn" autocomplete="username" />
@@ -925,7 +1024,7 @@ function buildGoalEditPanel(g) {
 }
 
 function buildManage() {
-  if (!showManage) return "";
+  if (activePanel !== "manage" && closingPanel !== "manage") return "";
   const dailyGoals = state.goals.filter(g => g.type === "daily");
   const list = dailyGoals.length === 0
     ? `<p class="gt-empty-hint">Ingen faste mål lagt til ennå.</p>`
@@ -955,7 +1054,7 @@ function buildManage() {
   }).join("");
 
   return `
-    <div class="gt-manage">
+    <div class="gt-manage${panelAnimClass("manage")}">
       <p class="gt-detail-date">${formatDateLabel(selectedDate)}</p>
       <p class="gt-section-heading">Gjentakende mål</p>
       ${list}
@@ -1116,11 +1215,11 @@ appEl.addEventListener("click", (e) => {
   if (action === "prev-month") { viewDate = new Date(viewDate.getFullYear(), viewDate.getMonth() - 1, 1); render(); }
   else if (action === "next-month") { viewDate = new Date(viewDate.getFullYear(), viewDate.getMonth() + 1, 1); render(); }
   else if (action === "toggle-theme") toggleTheme();
-  else if (action === "toggle-help") { showHelp = !showHelp; showManage = false; showAccount = false; showNotify = false; render(); }
+  else if (action === "toggle-help") setActivePanel("help");
   else if (action === "select-day") { const [y,m,d] = btn.dataset.date.split("-").map(Number); selectedDate = new Date(y, m-1, d); render(); }
-  else if (action === "toggle-manage") { showManage = !showManage; showAccount = false; showHelp = false; showNotify = false; editingGoalId = null; render(); }
-  else if (action === "toggle-account") { showAccount = !showAccount; showManage = false; showHelp = false; showNotify = false; accountMessage = ""; accountError = ""; render(); }
-  else if (action === "toggle-notify") { showNotify = !showNotify; showManage = false; showAccount = false; showHelp = false; notifyPermissionError = ""; render(); }
+  else if (action === "toggle-manage") setActivePanel("manage");
+  else if (action === "toggle-account") setActivePanel("account");
+  else if (action === "toggle-notify") setActivePanel("notify");
   else if (action === "activate-notify") { activateDeviceNotifications(); }
   else if (action === "secure-account") {
     const username = document.getElementById("account-username");
@@ -1225,6 +1324,37 @@ appEl.addEventListener("change", (e) => {
     if (t) t.disabled = !e.target.checked;
   }
 });
+
+// Midlertidig feilsøkingsverktøy for streak-tellingen. Åpne nettleserens
+// utviklerkonsoll (høyreklikk → Inspiser → fanen «Console»), skriv
+// gtDebug.streakTrace() og trykk Enter for å se en oversikt dag for dag
+// (planlagte mål, hvor mange som er krysset av, og om dagen regnes som
+// fullført). Fjernes igjen når streak-feilen er funnet.
+window.gtDebug = {
+  state: () => state,
+  streakTrace: (days = 10) => {
+    const trace = [];
+    const cursor = new Date();
+    for (let i = 0; i < days; i++) {
+      const key = toKey(cursor);
+      const goals = goalsForDate(key);
+      const doneIds = doneIdsFor(key);
+      const done = doneIds.filter(id => goals.some(g => g.id === id));
+      trace.push({
+        dato: key,
+        planlagte_mål: goals.map(g => g.text).join(", "),
+        antall_planlagt: goals.length,
+        antall_avkrysset: done.length,
+        avkrysset_ider_uten_treff: doneIds.filter(id => !goals.some(g => g.id === id)),
+        fullført: goals.length > 0 && done.length === goals.length,
+      });
+      cursor.setDate(cursor.getDate() - 1);
+    }
+    console.table(trace);
+    console.log("Beregnet streak akkurat nå:", computeStreak());
+    return trace;
+  },
+};
 
 render();
 bindForegroundMessaging();
