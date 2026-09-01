@@ -1,0 +1,1031 @@
+<!DOCTYPE html>
+<html lang="no">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Målkalender</title>
+<link rel="manifest" href="manifest.json" />
+<meta name="theme-color" content="#3F6B54" />
+<meta name="mobile-web-app-capable" content="yes" />
+<meta name="apple-mobile-web-app-capable" content="yes" />
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+<meta name="apple-mobile-web-app-title" content="Målkalender" />
+<link rel="apple-touch-icon" href="icon-192.png" />
+<link rel="icon" href="icon-192.png" />
+<style>
+@import url('https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,400;9..144,500;9..144,600&family=Inter:wght@400;500;600;700&display=swap');
+
+* { box-sizing: border-box; }
+html { background: #EEF1EC; }
+html.dark { background: #12160F; }
+body {
+  margin: 0;
+  min-height: 100vh;
+  display: flex;
+  justify-content: center;
+  padding: 24px 12px;
+  font-family: 'Inter', sans-serif;
+}
+
+.gt-root {
+  --bg: #F2F4EE;
+  --surface: #FFFFFF;
+  --ink: #23312A;
+  --muted: #7E8C85;
+  --line: #DCE3DA;
+  --accent: #3F6B54;
+  --accent-soft: #DCE9E1;
+  --warm: #C97A46;
+  color: var(--ink);
+  background: var(--bg);
+  padding: 18px 16px 24px;
+  border-radius: 16px;
+  max-width: 420px;
+  width: 100%;
+  position: relative;
+  transition: background 0.15s ease, color 0.15s ease;
+}
+.gt-root.gt-dark {
+  --bg: #1B211D;
+  --surface: #232A25;
+  --ink: #E7ECE7;
+  --muted: #8FA098;
+  --line: #34403A;
+  --accent: #6FA98A;
+  --accent-soft: #2C3B32;
+  --warm: #E0966A;
+}
+
+.gt-loading {
+  display: flex; align-items: center; justify-content: center;
+  min-height: 200px; color: var(--muted); font-size: 14px;
+}
+
+.gt-lock-error {
+  color: var(--warm);
+  font-size: 13px;
+  margin: -6px 0 14px;
+}
+
+.gt-header {
+  display: flex; align-items: center; justify-content: space-between;
+  margin-bottom: 14px;
+  gap: 8px;
+}
+.gt-month-nav {
+  display: flex; align-items: center; justify-content: center;
+  gap: 10px;
+  flex: 1;
+}
+.gt-header-spacer { width: 28px; flex-shrink: 0; }
+.gt-title {
+  font-family: 'Fraunces', serif;
+  font-weight: 500;
+  font-size: 22px;
+  margin: 0;
+  letter-spacing: -0.01em;
+  text-transform: capitalize;
+}
+.gt-year { color: var(--muted); font-weight: 400; }
+.gt-nav-btn {
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: 9px;
+  width: 32px; height: 32px;
+  display: flex; align-items: center; justify-content: center;
+  color: var(--ink);
+  cursor: pointer;
+  font-size: 15px;
+}
+.gt-nav-btn:hover { background: var(--accent-soft); }
+
+.gt-theme-btn {
+  width: 28px; height: 28px;
+  border-radius: 50%;
+  border: 1px solid var(--line);
+  background: var(--surface);
+  color: var(--ink);
+  display: flex; align-items: center; justify-content: center;
+  cursor: pointer;
+  flex-shrink: 0;
+  font-size: 13px;
+}
+.gt-theme-btn:hover { background: var(--accent-soft); }
+
+.gt-weekdays {
+  display: grid;
+  grid-template-columns: repeat(7, 1fr);
+  margin-bottom: 4px;
+}
+.gt-weekdays span {
+  text-align: center;
+  font-size: 11px;
+  color: var(--muted);
+  padding-bottom: 4px;
+  display: block;
+}
+
+.gt-grid {
+  display: grid;
+  grid-template-columns: repeat(7, 1fr);
+  gap: 4px;
+  margin-bottom: 16px;
+}
+.gt-cell {
+  aspect-ratio: 1 / 1;
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 3px;
+  padding: 4px 2px;
+  cursor: pointer;
+  font-family: 'Inter', sans-serif;
+  color: var(--ink);
+  width: 100%;
+}
+.gt-cell-out { opacity: 0.35; cursor: default; border-style: dashed; }
+.gt-cell-today { border-color: var(--warm); border-width: 1.5px; }
+.gt-cell-selected { background: var(--accent-soft); border-color: var(--accent); }
+.gt-date-num { font-size: 12px; font-weight: 500; }
+.gt-dots {
+  display: flex; flex-wrap: wrap;
+  gap: 2px; justify-content: center;
+  max-width: 32px;
+}
+.gt-dot {
+  width: 5px; height: 5px; border-radius: 50%;
+  border: 1px solid var(--muted);
+  background: transparent;
+}
+.gt-fraction { font-size: 9px; color: var(--muted); }
+
+.gt-today-bar {
+  display: flex; align-items: center; justify-content: space-between;
+  gap: 8px;
+  font-size: 13px;
+  padding: 10px 12px;
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  margin-bottom: 10px;
+  flex-wrap: wrap;
+}
+.gt-today-bar strong { color: var(--accent); }
+.gt-streak {
+  display: flex; align-items: center; gap: 4px;
+  color: var(--warm); font-weight: 600; font-size: 13px;
+}
+.gt-link-btn {
+  background: none; border: none; color: var(--accent);
+  font-size: 13px; font-weight: 600; cursor: pointer; padding: 0;
+}
+.gt-today-actions { display: flex; align-items: center; gap: 12px; margin-left: auto; }
+.gt-account-input {
+  width: 100%; font-size: 14px; padding: 8px 10px;
+  border: 1px solid var(--line); border-radius: 8px;
+  font-family: 'Inter', sans-serif; background: var(--bg);
+  color: var(--ink); margin-bottom: 6px;
+}
+.gt-account-input:focus { outline: 2px solid var(--accent); outline-offset: 1px; }
+.gt-account-btn {
+  width: 100%; height: 36px; border-radius: 8px;
+  margin-bottom: 4px; font-size: 13px; font-weight: 600;
+  background: var(--accent); color: white; border: none;
+  cursor: pointer; font-family: 'Inter', sans-serif;
+}
+.gt-account-success { color: var(--accent); font-size: 13px; margin: 8px 0 0; }
+
+.gt-manage {
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  padding: 12px;
+  margin-bottom: 10px;
+}
+.gt-manage-label { font-size: 12px; color: var(--muted); margin: 0 0 8px; }
+.gt-help-title {
+  font-family: 'Fraunces', serif;
+  font-size: 16px; font-weight: 500;
+  margin: 0 0 4px;
+}
+.gt-help-heading {
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--ink);
+  margin: 14px 0 3px;
+}
+.gt-help-body {
+  font-size: 13px;
+  color: var(--muted);
+  line-height: 1.45;
+  margin: 0;
+}
+.gt-goal-manage-list { list-style: none; margin: 0 0 10px; padding: 0; }
+.gt-goal-manage-list li {
+  display: flex; align-items: center; justify-content: space-between;
+  padding: 6px 0; font-size: 14px;
+  border-bottom: 1px solid var(--line);
+}
+.gt-goal-manage-list li:last-child { border-bottom: none; }
+.gt-goal-label { display: flex; align-items: center; gap: 8px; }
+.gt-color-dot { width: 9px; height: 9px; border-radius: 50%; flex-shrink: 0; display: inline-block; }
+.gt-icon-btn {
+  background: none; border: none; color: var(--muted); cursor: pointer;
+  display: flex; padding: 4px; font-size: 13px;
+}
+.gt-icon-btn:hover { color: var(--warm); }
+.gt-icon-btn-active { color: var(--accent); }
+.gt-manage-hint { font-size: 11px; color: var(--muted); margin: 10px 0 6px; }
+.gt-day-chips { display: flex; gap: 4px; flex-wrap: wrap; }
+.gt-day-chip {
+  font-size: 11px;
+  padding: 5px 8px;
+  border-radius: 999px;
+  border: 1px solid var(--line);
+  background: var(--bg);
+  color: var(--ink);
+  cursor: pointer;
+  font-family: 'Inter', sans-serif;
+}
+.gt-day-chip-active { background: var(--accent); border-color: var(--accent); color: white; }
+.gt-goal-sub { display: block; font-size: 11px; color: var(--muted); }
+.gt-add-row { display: flex; gap: 6px; }
+.gt-add-row input {
+  flex: 1; font-size: 14px; padding: 8px 10px;
+  border: 1px solid var(--line); border-radius: 8px;
+  font-family: 'Inter', sans-serif; background: var(--bg);
+  color: var(--ink);
+}
+.gt-add-row input:focus { outline: 2px solid var(--accent); outline-offset: 1px; }
+.gt-add-btn {
+  background: var(--accent); color: white; border: none;
+  border-radius: 8px; width: 36px; display: flex;
+  align-items: center; justify-content: center; cursor: pointer;
+  flex-shrink: 0; font-size: 16px;
+}
+.gt-add-once { margin-top: 12px; }
+
+.gt-detail {
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  padding: 14px;
+}
+.gt-detail-date {
+  font-family: 'Fraunces', serif;
+  font-size: 15px;
+  margin: 0 0 10px;
+  text-transform: capitalize;
+}
+.gt-section-label {
+  font-size: 11px; color: var(--muted); margin: 12px 0 4px;
+}
+.gt-empty-hint { font-size: 13px; color: var(--muted); margin: 0 0 10px; }
+.gt-goal-list { list-style: none; margin: 0; padding: 0; }
+.gt-goal-list li { margin-bottom: 4px; }
+.gt-check-row {
+  display: flex; align-items: center; gap: 10px;
+  width: 100%; background: none; border: none;
+  padding: 8px 4px; cursor: pointer; text-align: left;
+  border-radius: 8px;
+  font-family: 'Inter', sans-serif;
+  color: var(--ink);
+}
+.gt-check-row:hover { background: var(--bg); }
+.gt-check-row-once {
+  display: flex; align-items: center; justify-content: space-between;
+  padding-right: 4px;
+}
+.gt-check-row-inner {
+  display: flex; align-items: center; gap: 10px;
+  flex: 1; background: none; border: none;
+  padding: 8px 4px; cursor: pointer; text-align: left;
+  font-family: 'Inter', sans-serif;
+  color: var(--ink);
+}
+.gt-checkbox-btn {
+  background: none; border: none; padding: 8px 4px 8px 4px;
+  cursor: pointer; display: flex; align-items: center; flex-shrink: 0;
+}
+.gt-goal-text-btn {
+  display: flex; align-items: center; gap: 6px;
+  flex: 1; min-width: 0;
+  background: none; border: none;
+  padding: 8px 4px; cursor: pointer; text-align: left;
+  font-family: 'Inter', sans-serif;
+  color: var(--ink);
+  border-radius: 8px;
+}
+.gt-goal-text-btn:hover { background: var(--bg); }
+.gt-comment-dot {
+  width: 5px; height: 5px; border-radius: 50%;
+  background: var(--warm); flex-shrink: 0;
+}
+.gt-comment-wrap { padding: 0 4px 8px; }
+.gt-comment-input {
+  width: 100%; min-height: 56px;
+  font-size: 13px; padding: 8px 10px;
+  border: 1px solid var(--line); border-radius: 8px;
+  font-family: 'Inter', sans-serif; background: var(--bg);
+  color: var(--ink); resize: vertical;
+}
+.gt-comment-input:focus { outline: 2px solid var(--accent); outline-offset: 1px; }
+.gt-row-away { opacity: 0.7; }
+.gt-goal-label-muted {
+  display: flex; align-items: center; gap: 8px;
+  font-size: 14px; color: var(--muted);
+  text-decoration: line-through;
+  padding: 8px 4px;
+}
+.gt-checkbox {
+  width: 20px; height: 20px; border-radius: 6px;
+  border: 1.5px solid var(--muted);
+  display: flex; align-items: center; justify-content: center;
+  flex-shrink: 0; color: white;
+  font-size: 12px;
+}
+.gt-goal-text { font-size: 14px; }
+.gt-check-row-done .gt-goal-text {
+  text-decoration: line-through;
+  color: var(--muted);
+}
+
+.gt-stats {
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  padding: 12px;
+  margin-top: 10px;
+}
+.gt-stats-list { list-style: none; margin: 0; padding: 0; }
+.gt-stats-list li {
+  display: flex; align-items: center; justify-content: space-between;
+  padding: 6px 0; font-size: 14px;
+  border-bottom: 1px solid var(--line);
+}
+.gt-stats-list li:last-child { border-bottom: none; }
+.gt-stat-label { display: flex; align-items: center; gap: 8px; }
+.gt-stat-count { font-weight: 600; color: var(--accent); font-size: 13px; }
+</style>
+</head>
+<body>
+<div id="app" class="gt-root"></div>
+
+<script type="module">
+import { initializeApp } from "https://www.gstatic.com/firebasejs/10.13.0/firebase-app.js";
+import { getFirestore, doc, onSnapshot, setDoc } from "https://www.gstatic.com/firebasejs/10.13.0/firebase-firestore.js";
+import { getAuth, signInAnonymously, onAuthStateChanged, EmailAuthProvider, linkWithCredential, signInWithEmailAndPassword } from "https://www.gstatic.com/firebasejs/10.13.0/firebase-auth.js";
+
+const firebaseConfig = {
+  apiKey: "AIzaSyANIgaq9pbu9LABCUS1gXxvVWHt8gqSjAI",
+  authDomain: "maalkalender.firebaseapp.com",
+  projectId: "maalkalender",
+  storageBucket: "maalkalender.firebasestorage.app",
+  messagingSenderId: "1086811554153",
+  appId: "1:1086811554153:web:8529ec52c19261217dbdf8"
+};
+
+const fbApp = initializeApp(firebaseConfig);
+const db = getFirestore(fbApp);
+const auth = getAuth(fbApp);
+let stateRef = null;
+let uid = null;
+let authReady = false;
+
+const MANEDER = ["januar","februar","mars","april","mai","juni","juli","august","september","oktober","november","desember"];
+const UKEDAGER_KORT = ["Man","Tir","Ons","Tor","Fre","Lør","Søn"];
+const UKEDAGER_LANG = ["søndag","mandag","tirsdag","onsdag","torsdag","fredag","lørdag"];
+const PALETTE = ["#3F6B54","#C97A46","#5B7DB1","#B15B7D","#8A9A3F","#4F8A8B","#B1855B","#7D5BB1"];
+const WEEKDAY_ORDER = [1,2,3,4,5,6,0]; // Man..Søn i JS sin getDay()-rekkefølge, matcher UKEDAGER_KORT
+
+function toKey(date) {
+  return `${date.getFullYear()}-${String(date.getMonth()+1).padStart(2,"0")}-${String(date.getDate()).padStart(2,"0")}`;
+}
+function fromKey(key) {
+  const [y, m, d] = key.split("-").map(Number);
+  return new Date(y, m - 1, d);
+}
+function nextDayKey(dateKey) {
+  const d = fromKey(dateKey);
+  d.setDate(d.getDate() + 1);
+  return toKey(d);
+}
+function weekdayLabel(weekdays) {
+  const sorted = [...weekdays].sort((a, b) => WEEKDAY_ORDER.indexOf(a) - WEEKDAY_ORDER.indexOf(b));
+  return sorted.map((d) => UKEDAGER_KORT[WEEKDAY_ORDER.indexOf(d)]).join(", ");
+}
+function sameDay(a,b) {
+  return a.getFullYear()===b.getFullYear() && a.getMonth()===b.getMonth() && a.getDate()===b.getDate();
+}
+function buildGrid(viewDate) {
+  const year = viewDate.getFullYear(), month = viewDate.getMonth();
+  const firstOfMonth = new Date(year, month, 1);
+  const offset = (firstOfMonth.getDay() + 6) % 7;
+  const start = new Date(year, month, 1 - offset);
+  const cells = [];
+  for (let i=0;i<42;i++){ const d=new Date(start); d.setDate(start.getDate()+i); cells.push(d); }
+  return cells;
+}
+function escapeHtml(str) {
+  return String(str)
+    .replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;")
+    .replace(/"/g,"&quot;").replace(/'/g,"&#39;");
+}
+
+let state = { goals: [], completions: {}, theme: "light", postponements: [], comments: {} };
+let loaded = false;
+let viewDate = (() => { const d = new Date(); d.setDate(1); return d; })();
+let selectedDate = new Date();
+let showManage = false;
+let showAccount = false;
+let showHelp = false;
+let accountMessage = "";
+let accountError = "";
+let newGoalWeekdays = [];
+let openCommentKey = null;
+function commentKey(dateKey, goalId) { return `${dateKey}::${goalId}`; }
+
+const appEl = document.getElementById("app");
+
+let unsubscribeSnapshot = null;
+
+function startDataListener() {
+  if (unsubscribeSnapshot) { unsubscribeSnapshot(); unsubscribeSnapshot = null; }
+  stateRef = doc(db, "users", uid);
+  loaded = false;
+  unsubscribeSnapshot = onSnapshot(stateRef, (snap) => {
+    if (snap.exists()) {
+      const d = snap.data();
+      state = {
+        goals: Array.isArray(d.goals) ? d.goals : [],
+        completions: d.completions || {},
+        theme: d.theme === "dark" ? "dark" : "light",
+        postponements: Array.isArray(d.postponements) ? d.postponements : [],
+        comments: d.comments || {},
+      };
+    } else {
+      state = { goals: [], completions: {}, theme: "light", postponements: [], comments: {} };
+    }
+    loaded = true;
+    render();
+  }, (err) => {
+    console.error("Firestore-feil:", err);
+    loaded = true;
+    render();
+  });
+}
+
+onAuthStateChanged(auth, (user) => {
+  if (user) {
+    uid = user.uid;
+    authReady = true;
+    startDataListener();
+    render();
+  } else {
+    signInAnonymously(auth).catch((err) => console.error("Innloggingsfeil:", err));
+  }
+});
+
+const USERNAME_DOMAIN = "@maalkalender.lokal";
+function usernameToInternalEmail(username) {
+  const trimmed = username.trim().toLowerCase();
+  if (trimmed.includes("@")) return trimmed; // eksisterende konto sikret med ekte e-post – brukes som den er
+  return trimmed.replace(/[^a-z0-9_.-]/g, "") + USERNAME_DOMAIN;
+}
+
+function translateAuthError(e) {
+  const code = e && e.code;
+  if (code === "auth/email-already-in-use") return "Dette brukernavnet er allerede tatt. Prøv å logge inn i stedet, eller velg et annet.";
+  if (code === "auth/weak-password") return "Passordet må være minst 6 tegn.";
+  if (code === "auth/invalid-email") return "Ugyldig brukernavn – bruk kun bokstaver og tall.";
+  if (code === "auth/wrong-password" || code === "auth/invalid-credential") return "Feil brukernavn eller passord.";
+  if (code === "auth/user-not-found") return "Fant ingen konto med dette brukernavnet.";
+  return "Noe gikk galt. Prøv igjen.";
+}
+
+async function secureAccount(username, password) {
+  accountError = "";
+  accountMessage = "";
+  if (!username.trim()) {
+    accountError = "Skriv inn et brukernavn (bokstaver og tall).";
+    render();
+    return;
+  }
+  try {
+    const credential = EmailAuthProvider.credential(usernameToInternalEmail(username), password);
+    await linkWithCredential(auth.currentUser, credential);
+    accountMessage = "Kontoen er sikret. Bruk dette brukernavnet og passordet for å hente målene dine på en annen enhet.";
+  } catch (e) {
+    accountError = translateAuthError(e);
+  }
+  render();
+}
+
+async function loginExisting(username, password) {
+  accountError = "";
+  accountMessage = "";
+  if (!username.trim()) {
+    accountError = "Skriv inn et brukernavn (bokstaver og tall).";
+    render();
+    return;
+  }
+  try {
+    await signInWithEmailAndPassword(auth, usernameToInternalEmail(username), password);
+    accountMessage = "Innlogget. Målene dine lastes inn.";
+  } catch (e) {
+    accountError = translateAuthError(e);
+  }
+  render();
+}
+
+async function persist(next) {
+  state = next;
+  render();
+  if (!stateRef) return;
+  try {
+    await setDoc(stateRef, next);
+  } catch (e) {
+    console.error("Kunne ikke lagre:", e);
+  }
+}
+
+function isNativelyScheduled(g, dateKey) {
+  if (g.type === "once") return g.date === dateKey;
+  if (g.type === "daily") {
+    if (g.createdAt && dateKey < g.createdAt) return false;
+    if (!g.weekdays || g.weekdays.length === 0) return true;
+    return g.weekdays.includes(fromKey(dateKey).getDay());
+  }
+  return false;
+}
+function isPostponedAway(dateKey, goalId) {
+  return state.postponements.some(p => p.goalId === goalId && p.from === dateKey);
+}
+function postponedInto(dateKey) {
+  return state.postponements
+    .filter(p => p.to === dateKey)
+    .map(p => state.goals.find(g => g.id === p.goalId))
+    .filter(Boolean);
+}
+function goalsForDate(dateKey) {
+  const base = state.goals.filter(g => isNativelyScheduled(g, dateKey) && !isPostponedAway(dateKey, g.id));
+  const extra = postponedInto(dateKey).filter(g => !base.some(b => b.id === g.id));
+  return [...base, ...extra];
+}
+function doneIdsFor(dateKey) { return state.completions[dateKey] || []; }
+function countFor(dateKey) {
+  const goals = goalsForDate(dateKey);
+  const done = doneIdsFor(dateKey);
+  const doneCount = done.filter(id => goals.some(g => g.id === id)).length;
+  return { done: doneCount, total: goals.length, goals };
+}
+function nextColor() { return PALETTE[state.goals.length % PALETTE.length]; }
+
+function toggleGoal(dateKey, goalId) {
+  const current = doneIdsFor(dateKey);
+  const nextArr = current.includes(goalId) ? current.filter(id => id !== goalId) : [...current, goalId];
+  persist({ ...state, completions: { ...state.completions, [dateKey]: nextArr } });
+}
+function addDailyGoal(text) {
+  const t = text.trim();
+  if (!t) return;
+  const goal = { id: `g${Date.now()}`, text: t, color: nextColor(), type: "daily", createdAt: toKey(new Date()) };
+  if (newGoalWeekdays.length > 0) goal.weekdays = [...newGoalWeekdays];
+  persist({ ...state, goals: [...state.goals, goal] });
+  newGoalWeekdays = [];
+}
+function addOnceGoal(text, dateKey) {
+  const t = text.trim();
+  if (!t) return;
+  const goal = { id: `g${Date.now()}`, text: t, color: nextColor(), type: "once", date: dateKey };
+  persist({ ...state, goals: [...state.goals, goal] });
+}
+function deleteGoal(id) {
+  persist({ ...state, goals: state.goals.filter(g => g.id !== id) });
+}
+function toggleTheme() {
+  persist({ ...state, theme: state.theme === "dark" ? "light" : "dark" });
+}
+function togglePostpone(goalId, dateKey) {
+  const existing = state.postponements.find(p => p.goalId === goalId && p.from === dateKey);
+  if (existing) {
+    persist({ ...state, postponements: state.postponements.filter(p => p !== existing) });
+  } else {
+    const toDateKey = nextDayKey(dateKey);
+    persist({ ...state, postponements: [...state.postponements, { goalId, from: dateKey, to: toDateKey }] });
+  }
+}
+function cancelPostpone(goalId, toDateKey) {
+  persist({ ...state, postponements: state.postponements.filter(p => !(p.goalId === goalId && p.to === toDateKey)) });
+}
+
+function computeStreak() {
+  let count = 0;
+  const cursor = new Date();
+  const tKey = toKey(cursor);
+  const tGoals = goalsForDate(tKey);
+  const tDone = doneIdsFor(tKey).filter(id => tGoals.some(g => g.id === id)).length;
+  if (tGoals.length > 0 && tDone < tGoals.length) cursor.setDate(cursor.getDate() - 1);
+  for (let i = 0; i < 3650; i++) {
+    const key = toKey(cursor);
+    const goals = goalsForDate(key);
+    if (goals.length === 0) { cursor.setDate(cursor.getDate() - 1); continue; }
+    const done = doneIdsFor(key).filter(id => goals.some(g => g.id === id)).length;
+    if (done === goals.length) { count += 1; cursor.setDate(cursor.getDate() - 1); }
+    else break;
+  }
+  return count;
+}
+
+function buildHeader() {
+  const isDark = state.theme === "dark";
+  return `
+    <header class="gt-header">
+      <button class="gt-theme-btn" data-action="toggle-theme" aria-label="Bytt tema">${isDark ? "☀" : "🌙"}</button>
+      <div class="gt-month-nav">
+        <button class="gt-nav-btn" data-action="prev-month" aria-label="Forrige måned">‹</button>
+        <h1 class="gt-title">${MANEDER[viewDate.getMonth()]} <span class="gt-year">${viewDate.getFullYear()}</span></h1>
+        <button class="gt-nav-btn" data-action="next-month" aria-label="Neste måned">›</button>
+      </div>
+      <button class="gt-theme-btn" data-action="toggle-help" aria-label="Bruksanvisning">?</button>
+    </header>
+    <div class="gt-weekdays">${UKEDAGER_KORT.map(d => `<span>${d}</span>`).join("")}</div>
+  `;
+}
+
+function buildHelp() {
+  if (!showHelp) return "";
+  return `
+    <div class="gt-manage">
+      <p class="gt-help-title">Slik bruker du Målkalenderen</p>
+
+      <p class="gt-help-heading">Kalenderen</p>
+      <p class="gt-help-body">Klikk på en dato for å legge til, se eller redigere mål. Ved å klikke på «Rediger mål» kan du sette opp gjentakende mål, eller du kan bruke feltet under for å legge til engangsmål.</p>
+
+      <p class="gt-help-heading">Merk som fullført og kommentarer</p>
+      <p class="gt-help-body">Klikk på selve boksen ved siden av et mål for å markere som fullført. Klikk på teksten for å åpne et notatfelt der du kan skrive en kommentar. Mål med tilknyttet kommentar markeres med en prikk.</p>
+
+      <p class="gt-help-heading">Streak</p>
+      <p class="gt-help-body">Flammen under kalenderen viser hvor mange dager på rad du har fullført alle målene dine.</p>
+
+      <p class="gt-help-heading">Forskyve et mål</p>
+      <p class="gt-help-body">Er det et mål du ikke rekker? Trykk på pilen til høyre for målet for å flytte det til neste dag, uten å miste streaken din.</p>
+
+      <p class="gt-help-heading">Sammendrag</p>
+      <p class="gt-help-body">Nederst i appen ser du en liste over alle faste mål og hvor mange ganger hvert av dem er fullført totalt.</p>
+
+      <p class="gt-help-heading">Mørk modus</p>
+      <p class="gt-help-body">Måne/sol-ikonet øverst bytter mellom lyst og mørkt grensesnitt.</p>
+
+      <p class="gt-help-heading">Sikre kontoen din</p>
+      <p class="gt-help-body">Trykk «Sikre data» og lag et brukernavn og passord for å kunne logge inn og hente frem de samme målene på en annen telefon eller nettleser. Dette gjøres én gang, men er viktig.</p>
+
+      <p class="gt-help-heading">Streak</p>
+      <p class="gt-help-body">Flammen øverst viser hvor mange dager på rad du har fullført alle målene dine.</p>
+
+      <p class="gt-help-heading">Forskyve et mål</p>
+      <p class="gt-help-body">Er det et mål du ikke rekker? Trykk på pilen til høyre ved målet for å flytte det til neste dag, uten å miste streaken din.</p>
+
+      <p class="gt-help-heading">Sammendrag</p>
+      <p class="gt-help-body">Nederst i appen ser du en liste over alle faste mål og hvor mange ganger hvert av dem er krysset av totalt.</p>
+
+      <p class="gt-help-heading">Mørk modus</p>
+      <p class="gt-help-body">Måne/sol-ikonet øverst bytter mellom lys og mørk fargedrakt.</p>
+
+      <p class="gt-help-heading">Sikre kontoen din</p>
+      <p class="gt-help-body">Trykk «Sikre data» og lag et brukernavn og passord for å kunne logge inn og hente frem de samme målene på en annen telefon eller etter at nettleserdata er tømt.</p>
+    </div>
+  `;
+}
+
+function buildGridHtml() {
+  const cells = buildGrid(viewDate);
+  const today = new Date();
+  const rows = cells.map(d => {
+    const inMonth = d.getMonth() === viewDate.getMonth();
+    const key = toKey(d);
+    const { done, total, goals } = countFor(key);
+    const isToday = sameDay(d, today);
+    const isSelected = sameDay(d, selectedDate);
+    const cls = "gt-cell" + (inMonth ? "" : " gt-cell-out") + (isToday ? " gt-cell-today" : "") + (isSelected ? " gt-cell-selected" : "");
+    let dotsHtml = "";
+    if (total > 0 && total <= 8) {
+      dotsHtml = `<span class="gt-dots">${goals.map((g,i) => {
+        const filled = i < done;
+        const style = filled ? `background:${g.color};border-color:${g.color}` : `border-color:${g.color}`;
+        return `<span class="gt-dot" style="${style}"></span>`;
+      }).join("")}</span>`;
+    } else if (total > 8) {
+      dotsHtml = `<span class="gt-fraction">${done}/${total}</span>`;
+    }
+    return `<button class="${cls}" ${inMonth ? `data-action="select-day" data-date="${key}"` : "disabled"}>
+      <span class="gt-date-num">${d.getDate()}</span>
+      ${dotsHtml}
+    </button>`;
+  }).join("");
+  return `<div class="gt-grid">${rows}</div>`;
+}
+
+function buildTodayBar() {
+  const todayKey = toKey(new Date());
+  const { done, total } = countFor(todayKey);
+  const streak = computeStreak();
+  return `
+    <div class="gt-today-bar">
+      <span>I dag: <strong>${done} av ${total}</strong> mål</span>
+      <span class="gt-streak">🔥 ${streak} ${streak === 1 ? "dag" : "dager"}</span>
+      <div class="gt-today-actions">
+        <button class="gt-link-btn" data-action="toggle-manage">${showManage ? "Lukk" : "Rediger mål"}</button>
+        <button class="gt-link-btn" data-action="toggle-account">${showAccount ? "Lukk" : "Sikre data"}</button>
+      </div>
+    </div>
+  `;
+}
+
+function buildAccount() {
+  if (!showAccount) return "";
+  const user = auth.currentUser;
+  const isSecured = user && !user.isAnonymous;
+  const displayUsername = user && user.email ? user.email.replace(USERNAME_DOMAIN, "") : "";
+  const msg = accountMessage ? `<p class="gt-account-success">${escapeHtml(accountMessage)}</p>` : "";
+  const err = accountError ? `<p class="gt-lock-error">${escapeHtml(accountError)}</p>` : "";
+
+  if (isSecured) {
+    return `
+      <div class="gt-manage">
+        <p class="gt-manage-label">Konto</p>
+        <p class="gt-empty-hint">Sikret som «${escapeHtml(displayUsername)}». Logg inn med dette brukernavnet og passordet på andre enheter for å hente disse målene.</p>
+        ${msg}${err}
+      </div>
+    `;
+  }
+
+  return `
+    <div class="gt-manage">
+      <p class="gt-manage-label">Sikre kontoen din</p>
+      <p class="gt-empty-hint">Lag et brukernavn og et passord, så mister du ikke målene dine selv om du bytter telefon eller tømmer nettleserdata.</p>
+      <input id="account-username" class="gt-account-input" type="text" placeholder="Brukernavn" autocomplete="username" />
+      <input id="account-password" class="gt-account-input" type="password" placeholder="Passord (minst 6 tegn)" autocomplete="new-password" />
+      <button class="gt-account-btn" data-action="secure-account">Sikre konto</button>
+      <p class="gt-section-label">Har du allerede en sikret konto (fra en annen enhet)?</p>
+      <input id="login-username" class="gt-account-input" type="text" placeholder="Brukernavn" autocomplete="username" />
+      <input id="login-password" class="gt-account-input" type="password" placeholder="Passord" autocomplete="current-password" />
+      <button class="gt-account-btn" data-action="login-existing">Logg inn</button>
+      ${msg}${err}
+    </div>
+  `;
+}
+
+function buildManage() {
+  if (!showManage) return "";
+  const dailyGoals = state.goals.filter(g => g.type === "daily");
+  const list = dailyGoals.length === 0
+    ? `<p class="gt-empty-hint">Ingen faste mål lagt til ennå.</p>`
+    : `<ul class="gt-goal-manage-list">${dailyGoals.map(g => {
+        const sub = g.weekdays && g.weekdays.length ? weekdayLabel(g.weekdays) : "Hver dag";
+        return `
+        <li>
+          <span class="gt-goal-label">
+            <span class="gt-color-dot" style="background:${g.color}"></span>
+            <span>
+              ${escapeHtml(g.text)}
+              <span class="gt-goal-sub">${sub}</span>
+            </span>
+          </span>
+          <button class="gt-icon-btn" data-action="delete-goal" data-goal="${g.id}" aria-label="Slett">✕</button>
+        </li>`;
+      }).join("")}</ul>`;
+
+  const dayChips = WEEKDAY_ORDER.map((day, i) => {
+    const active = newGoalWeekdays.includes(day);
+    return `<button class="gt-day-chip${active ? " gt-day-chip-active" : ""}" data-action="toggle-weekday" data-day="${day}">${UKEDAGER_KORT[i]}</button>`;
+  }).join("");
+
+  return `
+    <div class="gt-manage">
+      <p class="gt-manage-label">Faste mål</p>
+      ${list}
+      <div class="gt-add-row">
+        <input id="new-daily-input" placeholder="Nytt mål, f.eks. Drikk 2 liter vann" />
+        <button class="gt-add-btn" data-action="add-daily-goal" aria-label="Legg til mål">+</button>
+      </div>
+      <p class="gt-manage-hint">Ukedager (la stå tomt for hver dag):</p>
+      <div class="gt-day-chips">${dayChips}</div>
+    </div>
+  `;
+}
+
+function renderGoalRow(g, dateKey, doneIds, opts) {
+  const done = doneIds.includes(g.id);
+  const cbStyle = done ? `background:${g.color};border-color:${g.color}` : `border-color:${g.color}`;
+  const isPostponed = opts.showPostpone && isPostponedAway(dateKey, g.id);
+  const cKey = commentKey(dateKey, g.id);
+  const hasComment = !!(state.comments[cKey] && state.comments[cKey].trim());
+  const commentOpen = openCommentKey === cKey;
+  let extra = "";
+  if (opts.showPostpone) {
+    extra += `<button class="gt-icon-btn${isPostponed ? " gt-icon-btn-active" : ""}" data-action="toggle-postpone" data-goal="${g.id}" data-date-key="${dateKey}" aria-label="Forskyv til i morgen" title="${isPostponed ? "Forskjøvet til i morgen – trykk for å angre" : "Forskyv til i morgen"}">→</button>`;
+  }
+  if (opts.showCancelPostpone) {
+    extra += `<button class="gt-icon-btn" data-action="cancel-postpone" data-goal="${g.id}" data-date-key="${dateKey}" aria-label="Angre forskyvning" title="Fjern fra denne dagen">✕</button>`;
+  }
+  if (opts.showDelete) {
+    extra += `<button class="gt-icon-btn" data-action="delete-goal" data-goal="${g.id}" aria-label="Slett">✕</button>`;
+  }
+  const commentBox = commentOpen
+    ? `<div class="gt-comment-wrap">
+        <textarea class="gt-comment-input" data-comment-goal="${g.id}" data-comment-date="${dateKey}" placeholder="Notat for denne dagen …">${escapeHtml(state.comments[cKey] || "")}</textarea>
+      </div>`
+    : "";
+  return `
+    <li>
+      <div class="gt-check-row gt-check-row-once${done ? " gt-check-row-done" : ""}">
+        <button class="gt-checkbox-btn" data-action="toggle-goal" data-goal="${g.id}" data-date-key="${dateKey}" aria-label="Merk som gjort">
+          <span class="gt-checkbox" style="${cbStyle}">${done ? "✓" : ""}</span>
+        </button>
+        <button class="gt-goal-text-btn" data-action="toggle-comment" data-goal="${g.id}" data-date-key="${dateKey}">
+          <span class="gt-goal-text">${escapeHtml(g.text)}</span>
+          ${hasComment ? `<span class="gt-comment-dot" title="Har notat"></span>` : ""}
+        </button>
+        ${extra}
+      </div>
+      ${commentBox}
+    </li>
+  `;
+}
+
+function buildDetail() {
+  const selectedKey = toKey(selectedDate);
+  const selectedDoneIds = doneIdsFor(selectedKey);
+  const dailyGoals = state.goals.filter(g => g.type === "daily" && isNativelyScheduled(g, selectedKey) && !isPostponedAway(selectedKey, g.id));
+  const onceGoals = state.goals.filter(g => g.type === "once" && isNativelyScheduled(g, selectedKey) && !isPostponedAway(selectedKey, g.id));
+  const pushedGoals = postponedInto(selectedKey).filter(g => !isNativelyScheduled(g, selectedKey));
+  const postponedAwayGoals = state.goals.filter(g => isNativelyScheduled(g, selectedKey) && isPostponedAway(selectedKey, g.id));
+
+  const dateLabel = `${UKEDAGER_LANG[selectedDate.getDay()]} ${selectedDate.getDate()}. ${MANEDER[selectedDate.getMonth()]}`;
+
+  let body = "";
+  if (dailyGoals.length === 0 && onceGoals.length === 0 && pushedGoals.length === 0 && postponedAwayGoals.length === 0) {
+    body = `<p class="gt-empty-hint">Du har ingen mål denne dagen ennå. Legg til faste mål under «Rediger mål», eller et engangsmål for denne dagen nedenfor.</p>`;
+  } else {
+    if (dailyGoals.length > 0) {
+      body += `<ul class="gt-goal-list">${dailyGoals.map(g => renderGoalRow(g, selectedKey, selectedDoneIds, { showPostpone: true })).join("")}</ul>`;
+    }
+    if (onceGoals.length > 0) {
+      body += `<p class="gt-section-label">Mål for denne dagen</p>
+      <ul class="gt-goal-list">${onceGoals.map(g => renderGoalRow(g, selectedKey, selectedDoneIds, { showPostpone: true, showDelete: true })).join("")}</ul>`;
+    }
+    if (pushedGoals.length > 0) {
+      body += `<p class="gt-section-label">Forskjøvet hit fra i går</p>
+      <ul class="gt-goal-list">${pushedGoals.map(g => renderGoalRow(g, selectedKey, selectedDoneIds, { showCancelPostpone: true })).join("")}</ul>`;
+    }
+    if (postponedAwayGoals.length > 0) {
+      body += `<p class="gt-section-label">Forskjøvet bort fra denne dagen</p>
+      <ul class="gt-goal-list">${postponedAwayGoals.map(g => `
+        <li>
+          <div class="gt-check-row gt-check-row-once gt-row-away">
+            <span class="gt-goal-label-muted"><span class="gt-color-dot" style="background:${g.color}"></span>${escapeHtml(g.text)}</span>
+            <button class="gt-icon-btn gt-icon-btn-active" data-action="toggle-postpone" data-goal="${g.id}" data-date-key="${selectedKey}" aria-label="Angre forskyvning">Angre</button>
+          </div>
+        </li>`).join("")}</ul>`;
+    }
+  }
+
+  return `
+    <div class="gt-detail">
+      <p class="gt-detail-date">${dateLabel}</p>
+      ${body}
+      <div class="gt-add-row gt-add-once">
+        <input id="new-once-input" placeholder="Engangsmål for denne dagen" />
+        <button class="gt-add-btn" data-action="add-once-goal" aria-label="Legg til engangsmål">+</button>
+      </div>
+    </div>
+  `;
+}
+
+function countCompletionsForGoal(goalId) {
+  let count = 0;
+  for (const dateKey in state.completions) {
+    if ((state.completions[dateKey] || []).includes(goalId)) count += 1;
+  }
+  return count;
+}
+
+function buildStats() {
+  const recurringGoals = state.goals.filter(g => g.type === "daily");
+  if (recurringGoals.length === 0) return "";
+  const rows = recurringGoals
+    .map(g => ({ g, count: countCompletionsForGoal(g.id) }))
+    .sort((a, b) => b.count - a.count)
+    .map(({ g, count }) => `
+      <li>
+        <span class="gt-stat-label"><span class="gt-color-dot" style="background:${g.color}"></span>${escapeHtml(g.text)}</span>
+        <span class="gt-stat-count">${count}</span>
+      </li>`)
+    .join("");
+  return `
+    <div class="gt-stats">
+      <p class="gt-manage-label">Sammendrag</p>
+      <ul class="gt-stats-list">${rows}</ul>
+    </div>
+  `;
+}
+
+function render() {
+  document.documentElement.classList.toggle("dark", state.theme === "dark");
+  appEl.className = "gt-root" + (state.theme === "dark" ? " gt-dark" : "");
+  if (!authReady || !loaded) {
+    appEl.innerHTML = `<div class="gt-loading">Henter mål …</div>`;
+    return;
+  }
+  appEl.innerHTML = buildHeader() + buildHelp() + buildGridHtml() + buildTodayBar() + buildManage() + buildAccount() + buildDetail() + buildStats();
+}
+
+appEl.addEventListener("click", (e) => {
+  const btn = e.target.closest("[data-action]");
+  if (!btn) return;
+  const action = btn.dataset.action;
+  if (action === "prev-month") { viewDate = new Date(viewDate.getFullYear(), viewDate.getMonth() - 1, 1); render(); }
+  else if (action === "next-month") { viewDate = new Date(viewDate.getFullYear(), viewDate.getMonth() + 1, 1); render(); }
+  else if (action === "toggle-theme") toggleTheme();
+  else if (action === "toggle-help") { showHelp = !showHelp; showManage = false; showAccount = false; render(); }
+  else if (action === "select-day") { const [y,m,d] = btn.dataset.date.split("-").map(Number); selectedDate = new Date(y, m-1, d); render(); }
+  else if (action === "toggle-manage") { showManage = !showManage; showAccount = false; showHelp = false; render(); }
+  else if (action === "toggle-account") { showAccount = !showAccount; showManage = false; showHelp = false; accountMessage = ""; accountError = ""; render(); }
+  else if (action === "secure-account") {
+    const username = document.getElementById("account-username");
+    const password = document.getElementById("account-password");
+    if (username && password && username.value.trim() && password.value) secureAccount(username.value.trim(), password.value);
+  }
+  else if (action === "login-existing") {
+    const username = document.getElementById("login-username");
+    const password = document.getElementById("login-password");
+    if (username && password && username.value.trim() && password.value) loginExisting(username.value.trim(), password.value);
+  }
+  else if (action === "toggle-goal") toggleGoal(btn.dataset.dateKey, btn.dataset.goal);
+  else if (action === "delete-goal") deleteGoal(btn.dataset.goal);
+  else if (action === "add-daily-goal") {
+    const input = document.getElementById("new-daily-input");
+    if (input) addDailyGoal(input.value);
+  }
+  else if (action === "add-once-goal") {
+    const input = document.getElementById("new-once-input");
+    if (input) addOnceGoal(input.value, toKey(selectedDate));
+  }
+  else if (action === "toggle-weekday") {
+    const day = Number(btn.dataset.day);
+    const input = document.getElementById("new-daily-input");
+    const draft = input ? input.value : "";
+    newGoalWeekdays = newGoalWeekdays.includes(day) ? newGoalWeekdays.filter(d => d !== day) : [...newGoalWeekdays, day];
+    render();
+    const newInput = document.getElementById("new-daily-input");
+    if (newInput) {
+      newInput.value = draft;
+      newInput.focus();
+      newInput.setSelectionRange(draft.length, draft.length);
+    }
+  }
+  else if (action === "toggle-postpone") togglePostpone(btn.dataset.goal, btn.dataset.dateKey);
+  else if (action === "cancel-postpone") cancelPostpone(btn.dataset.goal, btn.dataset.dateKey);
+  else if (action === "toggle-comment") {
+    const key = commentKey(btn.dataset.dateKey, btn.dataset.goal);
+    openCommentKey = openCommentKey === key ? null : key;
+    render();
+    if (openCommentKey === key) {
+      const ta = document.querySelector(`textarea[data-comment-goal="${btn.dataset.goal}"][data-comment-date="${btn.dataset.dateKey}"]`);
+      if (ta) { ta.focus(); ta.setSelectionRange(ta.value.length, ta.value.length); }
+    }
+  }
+});
+
+appEl.addEventListener("focusout", (e) => {
+  const ta = e.target.closest("textarea[data-comment-goal]");
+  if (!ta) return;
+  const key = commentKey(ta.dataset.commentDate, ta.dataset.commentGoal);
+  const value = ta.value;
+  const current = state.comments[key] || "";
+  if (value === current) return;
+  const nextComments = { ...state.comments };
+  if (value.trim() === "") {
+    delete nextComments[key];
+  } else {
+    nextComments[key] = value;
+  }
+  persist({ ...state, comments: nextComments });
+});
+
+appEl.addEventListener("keydown", (e) => {
+  if (e.key !== "Enter") return;
+  if (e.target.tagName === "TEXTAREA") return;
+  if (e.target.id === "new-daily-input") addDailyGoal(e.target.value);
+  else if (e.target.id === "new-once-input") addOnceGoal(e.target.value, toKey(selectedDate));
+});
+
+render();
+</script>
+</body>
+</html>
