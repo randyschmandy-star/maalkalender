@@ -207,6 +207,12 @@ body {
   margin-bottom: 10px;
 }
 .gt-manage-label { font-size: 12px; color: var(--muted); margin: 0 0 8px; }
+.gt-section-heading {
+  font-family: 'Fraunces', serif;
+  font-size: 14px;
+  font-weight: 700;
+  margin: 0 0 8px;
+}
 .gt-help-title {
   font-family: 'Fraunces', serif;
   font-size: 16px; font-weight: 500;
@@ -432,6 +438,9 @@ function toKey(date) {
 function fromKey(key) {
   const [y, m, d] = key.split("-").map(Number);
   return new Date(y, m - 1, d);
+}
+function formatDateLabel(date) {
+  return `${UKEDAGER_LANG[date.getDay()]} ${date.getDate()}. ${MANEDER[date.getMonth()]}`;
 }
 function nextDayKey(dateKey) {
   const d = fromKey(dateKey);
@@ -959,7 +968,8 @@ function buildManage() {
 
   return `
     <div class="gt-manage">
-      <p class="gt-manage-label">Faste mål</p>
+      <p class="gt-detail-date">${formatDateLabel(selectedDate)}</p>
+      <p class="gt-section-heading">Gjentakende mål</p>
       ${list}
       <div class="gt-add-row">
         <input id="new-daily-input" placeholder="Nytt mål, f.eks. Drikk 2 liter vann" />
@@ -971,6 +981,16 @@ function buildManage() {
         <input type="checkbox" id="new-daily-notify" /> 🔔 Varsle meg om dette målet
       </label>
       <input type="time" step="300" id="new-daily-notify-time" class="gt-account-input" value="${DEFAULT_NOTIFY_TIME}" disabled />
+
+      <p class="gt-section-heading" style="margin-top:16px;">Engangsmål</p>
+      <div class="gt-add-row gt-add-once">
+        <input id="new-once-input" placeholder="Engangsmål for denne dagen" />
+        <button class="gt-add-btn" data-action="add-once-goal" aria-label="Legg til engangsmål">+</button>
+      </div>
+      <label class="gt-notify-check" style="margin-top:8px;">
+        <input type="checkbox" id="new-once-notify" /> 🔔 Varsle meg om dette målet
+      </label>
+      <input type="time" step="300" id="new-once-notify-time" class="gt-account-input" value="${DEFAULT_NOTIFY_TIME}" disabled />
     </div>
   `;
 }
@@ -1026,11 +1046,11 @@ function buildDetail() {
   const pushedGoals = postponedInto(selectedKey).filter(g => !isNativelyScheduled(g, selectedKey));
   const postponedAwayGoals = state.goals.filter(g => isNativelyScheduled(g, selectedKey) && isPostponedAway(selectedKey, g.id));
 
-  const dateLabel = `${UKEDAGER_LANG[selectedDate.getDay()]} ${selectedDate.getDate()}. ${MANEDER[selectedDate.getMonth()]}`;
+  const dateLabel = formatDateLabel(selectedDate);
 
   let body = "";
   if (dailyGoals.length === 0 && onceGoals.length === 0 && pushedGoals.length === 0 && postponedAwayGoals.length === 0) {
-    body = `<p class="gt-empty-hint">Du har ingen mål denne dagen ennå. Legg til faste mål under «Rediger mål», eller et engangsmål for denne dagen nedenfor.</p>`;
+    body = `<p class="gt-empty-hint">Du har ingen mål denne dagen ennå. Legg til gjentakende eller engangsmål under «Rediger mål».</p>`;
   } else {
     if (dailyGoals.length > 0) {
       body += `<ul class="gt-goal-list">${dailyGoals.map(g => renderGoalRow(g, selectedKey, selectedDoneIds, { showPostpone: true })).join("")}</ul>`;
@@ -1059,14 +1079,6 @@ function buildDetail() {
     <div class="gt-detail">
       <p class="gt-detail-date">${dateLabel}</p>
       ${body}
-      <div class="gt-add-row gt-add-once">
-        <input id="new-once-input" placeholder="Engangsmål for denne dagen" />
-        <button class="gt-add-btn" data-action="add-once-goal" aria-label="Legg til engangsmål">+</button>
-      </div>
-      <label class="gt-notify-check" style="margin-top:8px;">
-        <input type="checkbox" id="new-once-notify" /> 🔔 Varsle meg om dette målet
-      </label>
-      <input type="time" step="300" id="new-once-notify-time" class="gt-account-input" value="${DEFAULT_NOTIFY_TIME}" disabled />
     </div>
   `;
 }
