@@ -1,0 +1,31 @@
+name: Send goal notifications
+
+on:
+  schedule:
+    # Kjører hvert 5. minutt (samme mønster som varsel-eksperimentet).
+    - cron: "*/5 * * * *"
+  workflow_dispatch: {}
+    # Gjør at du kan trykke "Run workflow" i GitHub Actions-fanen for å
+    # teste med én gang, uten å vente på tidsplanen.
+
+jobs:
+  send:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Sjekk ut repo
+        uses: actions/checkout@v4
+
+      - name: Sett opp Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+
+      - name: Installer avhengigheter
+        working-directory: scripts
+        run: npm install
+
+      - name: Send varsler for mål som har forfalt
+        working-directory: scripts
+        env:
+          FIREBASE_SERVICE_ACCOUNT: ${{ secrets.FIREBASE_SERVICE_ACCOUNT }}
+        run: node send-goal-notifications.mjs
