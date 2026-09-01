@@ -1,74 +1,32 @@
+name: Send interval notifications
 
-import admin from "firebase-admin";
- 
-const raw = process.env.FIREBASE_SERVICE_ACCOUNT;
-if (!raw) {
-  console.error("Mangler FIREBASE_SERVICE_ACCOUNT (GitHub secret).");
-  process.exitCode = 1;
-  throw new Error("Mangler FIREBASE_SERVICE_ACCOUNT");
-}
- 
-const serviceAccount = JSON.parse(raw);
- 
-admin.initializeApp({
-  credential: admin.credential.cert(serviceAccount),
-});
- 
-const db = admin.firestore();
-const messaging = admin.messaging();
-const COLLECTION = "notifyTests";
- 
-async function main() {
-  const now = Date.now();
-  const snapshot = await db.collection(COLLECTION).where("enabled", "==", true).get();
- 
-  if (snapshot.empty) {
-    console.log("Ingen aktive abonnenter.");
-    return;
-  }
- 
-  for (const docSnap of snapshot.docs) {
-    const data = docSnap.data();
-    const { token, intervalMinutes, lastSent } = data;
- 
-    if (!token || !intervalMinutes) {
-      console.log(`Hopper over ${docSnap.id}: mangler token eller intervall.`);
-      continue;
-    }
- 
-    const intervalMs = Number(intervalMinutes) * 60 * 1000;
-    const due = !lastSent || now - lastSent >= intervalMs;
-    if (!due) continue;
- 
-    try {
-      await messaging.send({
-        token,
-        data: {
-          title: "Målkalender-test",
-          body: `Testvarsel – hvert ${intervalMinutes}. minutt`,
-        },
-      });
-      await docSnap.ref.update({ lastSent: now });
-      console.log(`Sendt varsel til ${docSnap.id}.`);
-    } catch (err) {
-      console.error(`Feil ved sending til ${docSnap.id}: ${err.message}`);
-      // Ugyldig/utløpt token – skru av abonnementet så vi ikke prøver igjen.
-      if (
-        err.code === "messaging/registration-token-not-registered" ||
-        err.code === "messaging/invalid-argument"
-      ) {
-        await docSnap.ref.update({ enabled: false });
-      }
-    }
-  }
-}
- 
-main().catch((err) => {
-  console.error(err);
-  process.exitCode = 1;
-});
-// Merk: bevisst INGEN process.exit() her. I GitHub Actions er stdout en
-// "pipe", ikke en terminal, og skriving dit skjer asynkront – et eksplisitt
-// process.exit() rett etter siste console.log kan kutte prosessen før
-// utskriften faktisk er flushet til loggen. Ved å la Node avslutte naturlig
-// (og bruke process.exitCode i stedet) får all utskrift tid til å komme med.
+on:
+  schedule:
+    # Kjører hvert 5. minutt. GitHub kan forsinke dette noe ved høy last,
+    # så tenk på intervallene som "omtrentlige" i denne test-fasen.
+    - cron: "*/5 * * * *"
+  workflow_dispatch: {}
+    # Gjør at du kan trykke "Run workflow" i GitHub Actions-fanen
+    # for å teste med én gang, uten å vente på tidsplanen.
+
+jobs:
+  send:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Sjekk ut repo
+        uses: actions/checkout@v4
+
+      - name: Sett opp Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+
+      - name: Installer avhengigheter
+        working-directory: scripts
+        run: npm install
+
+      - name: Send varsler som har forfalt
+        working-directory: scripts
+        env:
+          FIREBASE_SERVICE_ACCOUNT: ${{ secrets.FIREBASE_SERVICE_ACCOUNT }}
+        run: node send-notifications.mjs
