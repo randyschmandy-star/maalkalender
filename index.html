@@ -370,6 +370,25 @@ body {
 .gt-stats-list li:last-child { border-bottom: none; }
 .gt-stat-label { display: flex; align-items: center; gap: 8px; }
 .gt-stat-count { font-weight: 600; color: var(--accent); font-size: 13px; }
+
+.gt-goal-row-actions { display: flex; gap: 4px; align-items: center; }
+.gt-goal-edit-row {
+  display: flex; flex-direction: column; gap: 8px;
+  padding: 10px 0; border-bottom: 1px solid var(--line);
+}
+.gt-notify-check {
+  display: flex; align-items: center; gap: 6px;
+  font-size: 13px; color: var(--ink);
+}
+.gt-select {
+  width: 100%; font-size: 13px; padding: 8px 10px;
+  border: 1px solid var(--line); border-radius: 8px;
+  font-family: 'Inter', sans-serif; background: var(--bg);
+  color: var(--ink);
+}
+.gt-select:disabled { opacity: 0.5; }
+.gt-edit-actions { display: flex; gap: 8px; }
+.gt-btn-secondary { background: var(--surface); color: var(--ink); border: 1px solid var(--line); }
 </style>
 </head>
 <body>
@@ -377,8 +396,9 @@ body {
 
 <script type="module">
 import { initializeApp } from "https://www.gstatic.com/firebasejs/10.13.0/firebase-app.js";
-import { getFirestore, doc, onSnapshot, setDoc } from "https://www.gstatic.com/firebasejs/10.13.0/firebase-firestore.js";
+import { getFirestore, doc, onSnapshot, setDoc, arrayUnion } from "https://www.gstatic.com/firebasejs/10.13.0/firebase-firestore.js";
 import { getAuth, signInAnonymously, onAuthStateChanged, EmailAuthProvider, linkWithCredential, signInWithEmailAndPassword } from "https://www.gstatic.com/firebasejs/10.13.0/firebase-auth.js";
+import { getMessaging, getToken, onMessage } from "https://www.gstatic.com/firebasejs/10.13.0/firebase-messaging.js";
 
 const firebaseConfig = {
   apiKey: "AIzaSyANIgaq9pbu9LABCUS1gXxvVWHt8gqSjAI",
@@ -388,6 +408,10 @@ const firebaseConfig = {
   messagingSenderId: "1086811554153",
   appId: "1:1086811554153:web:8529ec52c19261217dbdf8"
 };
+
+// Samme VAPID-nøkkel som ble generert for varsel-eksperimentet (prosjekt-bred, ikke enhets-spesifikk).
+const VAPID_KEY = "BLPSLb3XYj6dT9MGTDR_SqzRd_a346elkWc5zhY1j_28-IkVb0sFAfOM80FVq_Y-QJ72SnEJK02azKb5TGj5yvo";
+const DEFAULT_NOTIFY_TIME = "09:00";
 
 const fbApp = initializeApp(firebaseConfig);
 const db = getFirestore(fbApp);
@@ -436,17 +460,21 @@ function escapeHtml(str) {
     .replace(/"/g,"&quot;").replace(/'/g,"&#39;");
 }
 
-let state = { goals: [], completions: {}, theme: "light", postponements: [], comments: {} };
+let state = { goals: [], completions: {}, theme: "light", postponements: [], comments: {}, fcmTokens: [], notifyLastSent: {} };
 let loaded = false;
 let viewDate = (() => { const d = new Date(); d.setDate(1); return d; })();
 let selectedDate = new Date();
 let showManage = false;
 let showAccount = false;
 let showHelp = false;
+let showNotify = false;
 let accountMessage = "";
 let accountError = "";
 let newGoalWeekdays = [];
 let openCommentKey = null;
+let editingGoalId = null;
+let notifyBusy = false;
+let notifyPermissionError = "";
 function commentKey(dateKey, goalId) { return `${dateKey}::${goalId}`; }
 
 const appEl = document.getElementById("app");
@@ -466,9 +494,11 @@ function startDataListener() {
         theme: d.theme === "dark" ? "dark" : "light",
         postponements: Array.isArray(d.postponements) ? d.postponements : [],
         comments: d.comments || {},
+        fcmTokens: Array.isArray(d.fcmTokens) ? d.fcmTokens : [],
+        notifyLastSent: d.notifyLastSent || {},
       };
     } else {
-      state = { goals: [], completions: {}, theme: "light", postponements: [], comments: {} };
+      state = { goals: [], completions: {}, theme: "light", postponements: [], comments: {}, fcmTokens: [], notifyLastSent: {} };
     }
     loaded = true;
     render();
@@ -590,22 +620,99 @@ function toggleGoal(dateKey, goalId) {
   const nextArr = current.includes(goalId) ? current.filter(id => id !== goalId) : [...current, goalId];
   persist({ ...state, completions: { ...state.completions, [dateKey]: nextArr } });
 }
-function addDailyGoal(text) {
+function addDailyGoal(text, notifyEnabled, notifyTime) {
   const t = text.trim();
   if (!t) return;
   const goal = { id: `g${Date.now()}`, text: t, color: nextColor(), type: "daily", createdAt: toKey(new Date()) };
   if (newGoalWeekdays.length > 0) goal.weekdays = [...newGoalWeekdays];
+  if (notifyEnabled) goal.notify = { enabled: true, time: notifyTime || DEFAULT_NOTIFY_TIME };
   persist({ ...state, goals: [...state.goals, goal] });
   newGoalWeekdays = [];
 }
-function addOnceGoal(text, dateKey) {
+function addOnceGoal(text, dateKey, notifyEnabled, notifyTime) {
   const t = text.trim();
   if (!t) return;
   const goal = { id: `g${Date.now()}`, text: t, color: nextColor(), type: "once", date: dateKey };
+  if (notifyEnabled) goal.notify = { enabled: true, time: notifyTime || DEFAULT_NOTIFY_TIME };
   persist({ ...state, goals: [...state.goals, goal] });
 }
 function deleteGoal(id) {
   persist({ ...state, goals: state.goals.filter(g => g.id !== id) });
+}
+function startEditGoal(id) {
+  editingGoalId = id;
+  render();
+  const input = document.getElementById("edit-goal-text");
+  if (input) { input.focus(); input.setSelectionRange(input.value.length, input.value.length); }
+}
+function cancelEditGoal() {
+  editingGoalId = null;
+  render();
+}
+function saveEditGoal(id, text, notifyEnabled, notifyTime) {
+  const t = text.trim();
+  if (!t) return;
+  const nextGoals = state.goals.map((g) => {
+    if (g.id !== id) return g;
+    const next = { ...g, text: t };
+    if (notifyEnabled) {
+      next.notify = { enabled: true, time: notifyTime || DEFAULT_NOTIFY_TIME };
+    } else if (g.notify) {
+      next.notify = { ...g.notify, enabled: false };
+    }
+    return next;
+  });
+  editingGoalId = null;
+  persist({ ...state, goals: nextGoals });
+}
+
+function notifyPermissionState() {
+  if (!("Notification" in window)) return "unsupported";
+  return Notification.permission; // "default" | "granted" | "denied"
+}
+function deviceHasNotifyToken() {
+  return Array.isArray(state.fcmTokens) && state.fcmTokens.length > 0;
+}
+async function activateDeviceNotifications() {
+  notifyBusy = true; notifyPermissionError = ""; render();
+  try {
+    if (!("serviceWorker" in navigator)) throw new Error("Nettleseren støtter ikke service workers.");
+    if (!("Notification" in window)) throw new Error("Nettleseren støtter ikke varsler.");
+    const permission = await Notification.requestPermission();
+    if (permission !== "granted") throw new Error("Du må gi tillatelse til varsler for at dette skal fungere.");
+    await navigator.serviceWorker.register("firebase-messaging-sw.js");
+    const registration = await navigator.serviceWorker.ready;
+    const messaging = getMessaging(fbApp);
+    const token = await getToken(messaging, { vapidKey: VAPID_KEY, serviceWorkerRegistration: registration });
+    if (!token) throw new Error("Fikk ingen token fra Firebase Cloud Messaging.");
+    if (stateRef) {
+      await setDoc(stateRef, { fcmTokens: arrayUnion(token) }, { merge: true });
+    }
+  } catch (e) {
+    notifyPermissionError = e.message || String(e);
+  }
+  notifyBusy = false;
+  render();
+}
+let foregroundMessagingBound = false;
+function bindForegroundMessaging() {
+  // Når appen er åpen og i fokus, viser ikke nettleseren varselet automatisk
+  // via service workeren — vi må selv vise det når meldingen kommer inn her.
+  if (foregroundMessagingBound) return;
+  if (!("Notification" in window) || !("serviceWorker" in navigator)) return;
+  try {
+    const messaging = getMessaging(fbApp);
+    onMessage(messaging, (payload) => {
+      const title = (payload.data && payload.data.title) || "Målkalender";
+      const body = (payload.data && payload.data.body) || "";
+      if (Notification.permission === "granted") {
+        new Notification(title, { body });
+      }
+    });
+    foregroundMessagingBound = true;
+  } catch (e) {
+    // Stille feil her – dette er kun en "fin å ha"-funksjon for varsler mens fanen er åpen.
+  }
 }
 function toggleTheme() {
   persist({ ...state, theme: state.theme === "dark" ? "light" : "dark" });
@@ -683,6 +790,21 @@ function buildHelp() {
 
       <p class="gt-help-heading">Sikre kontoen din</p>
       <p class="gt-help-body">Trykk «Sikre data» og lag et brukernavn og passord for å kunne logge inn og hente frem de samme målene på en annen telefon eller nettleser. Dette gjøres én gang, men er viktig.</p>
+
+      <p class="gt-help-heading">Streak</p>
+      <p class="gt-help-body">Flammen øverst viser hvor mange dager på rad du har fullført alle målene dine.</p>
+
+      <p class="gt-help-heading">Forskyve et mål</p>
+      <p class="gt-help-body">Er det et mål du ikke rekker? Trykk på pilen til høyre ved målet for å flytte det til neste dag, uten å miste streaken din.</p>
+
+      <p class="gt-help-heading">Sammendrag</p>
+      <p class="gt-help-body">Nederst i appen ser du en liste over alle faste mål og hvor mange ganger hvert av dem er krysset av totalt.</p>
+
+      <p class="gt-help-heading">Mørk modus</p>
+      <p class="gt-help-body">Måne/sol-ikonet øverst bytter mellom lys og mørk fargedrakt.</p>
+
+      <p class="gt-help-heading">Sikre kontoen din</p>
+      <p class="gt-help-body">Trykk «Sikre data» og lag et brukernavn og passord for å kunne logge inn og hente frem de samme målene på en annen telefon eller etter at nettleserdata er tømt.</p>
     </div>
   `;
 }
@@ -725,8 +847,30 @@ function buildTodayBar() {
       <span class="gt-streak">🔥 ${streak} ${streak === 1 ? "dag" : "dager"}</span>
       <div class="gt-today-actions">
         <button class="gt-link-btn" data-action="toggle-manage">${showManage ? "Lukk" : "Rediger mål"}</button>
+        <button class="gt-link-btn" data-action="toggle-notify">${showNotify ? "Lukk" : "Varsler"}</button>
         <button class="gt-link-btn" data-action="toggle-account">${showAccount ? "Lukk" : "Sikre data"}</button>
       </div>
+    </div>
+  `;
+}
+
+function buildNotifySettings() {
+  if (!showNotify) return "";
+  const perm = notifyPermissionState();
+  const hasToken = deviceHasNotifyToken();
+  const statusLabel = perm === "granted" && hasToken
+    ? "aktivert på denne enheten"
+    : perm === "denied"
+      ? "blokkert i nettleseren/systemet"
+      : "ikke aktivert på denne enheten";
+  return `
+    <div class="gt-manage">
+      <p class="gt-manage-label">Varsler</p>
+      <p class="gt-empty-hint">Skru på varsler på denne enheten for å bli minnet på mål du har valgt å varsles om under «Rediger mål» eller når du legger til et nytt mål.</p>
+      <p class="gt-empty-hint" style="margin-top:-4px;">Status: ${statusLabel}</p>
+      <button class="gt-account-btn" data-action="activate-notify" ${notifyBusy ? "disabled" : ""}>${notifyBusy ? "Jobber …" : hasToken ? "Aktiver på nytt" : "Aktiver varsler på denne enheten"}</button>
+      ${notifyPermissionError ? `<p class="gt-lock-error">${escapeHtml(notifyPermissionError)}</p>` : ""}
+      <p class="gt-manage-hint">Husk: hver enhet (telefon, PC osv.) må aktiveres for seg.</p>
     </div>
   `;
 }
@@ -765,23 +909,46 @@ function buildAccount() {
   `;
 }
 
+function buildGoalEditPanel(g) {
+  const time = (g.notify && g.notify.time) || DEFAULT_NOTIFY_TIME;
+  const enabled = !!(g.notify && g.notify.enabled);
+  return `
+    <li class="gt-goal-edit-row">
+      <input id="edit-goal-text" class="gt-account-input" type="text" value="${escapeHtml(g.text)}" />
+      <label class="gt-notify-check">
+        <input type="checkbox" id="edit-goal-notify" ${enabled ? "checked" : ""} /> 🔔 Varsle meg om dette målet
+      </label>
+      <input type="time" step="300" id="edit-goal-notify-time" class="gt-account-input" value="${time}" ${enabled ? "" : "disabled"} />
+      <div class="gt-edit-actions">
+        <button class="gt-account-btn" data-action="save-goal-edit" data-goal="${g.id}">Lagre</button>
+        <button class="gt-account-btn gt-btn-secondary" data-action="cancel-goal-edit">Avbryt</button>
+      </div>
+    </li>
+  `;
+}
+
 function buildManage() {
   if (!showManage) return "";
   const dailyGoals = state.goals.filter(g => g.type === "daily");
   const list = dailyGoals.length === 0
     ? `<p class="gt-empty-hint">Ingen faste mål lagt til ennå.</p>`
     : `<ul class="gt-goal-manage-list">${dailyGoals.map(g => {
+        if (editingGoalId === g.id) return buildGoalEditPanel(g);
         const sub = g.weekdays && g.weekdays.length ? weekdayLabel(g.weekdays) : "Hver dag";
+        const bell = g.notify && g.notify.enabled ? ` <span title="Varsler på">🔔</span>` : "";
         return `
         <li>
           <span class="gt-goal-label">
             <span class="gt-color-dot" style="background:${g.color}"></span>
             <span>
-              ${escapeHtml(g.text)}
+              ${escapeHtml(g.text)}${bell}
               <span class="gt-goal-sub">${sub}</span>
             </span>
           </span>
-          <button class="gt-icon-btn" data-action="delete-goal" data-goal="${g.id}" aria-label="Slett">✕</button>
+          <span class="gt-goal-row-actions">
+            <button class="gt-icon-btn" data-action="edit-goal" data-goal="${g.id}" aria-label="Rediger">✎</button>
+            <button class="gt-icon-btn" data-action="delete-goal" data-goal="${g.id}" aria-label="Slett">✕</button>
+          </span>
         </li>`;
       }).join("")}</ul>`;
 
@@ -800,6 +967,10 @@ function buildManage() {
       </div>
       <p class="gt-manage-hint">Ukedager (la stå tomt for hver dag):</p>
       <div class="gt-day-chips">${dayChips}</div>
+      <label class="gt-notify-check" style="margin-top:10px;">
+        <input type="checkbox" id="new-daily-notify" /> 🔔 Varsle meg om dette målet
+      </label>
+      <input type="time" step="300" id="new-daily-notify-time" class="gt-account-input" value="${DEFAULT_NOTIFY_TIME}" disabled />
     </div>
   `;
 }
@@ -821,11 +992,15 @@ function renderGoalRow(g, dateKey, doneIds, opts) {
   if (opts.showDelete) {
     extra += `<button class="gt-icon-btn" data-action="delete-goal" data-goal="${g.id}" aria-label="Slett">✕</button>`;
   }
+  if (opts.showEdit) {
+    extra += `<button class="gt-icon-btn" data-action="edit-goal" data-goal="${g.id}" aria-label="Rediger">✎</button>`;
+  }
   const commentBox = commentOpen
     ? `<div class="gt-comment-wrap">
         <textarea class="gt-comment-input" data-comment-goal="${g.id}" data-comment-date="${dateKey}" placeholder="Notat for denne dagen …">${escapeHtml(state.comments[cKey] || "")}</textarea>
       </div>`
     : "";
+  const bell = g.notify && g.notify.enabled ? ` <span title="Varsler på">🔔</span>` : "";
   return `
     <li>
       <div class="gt-check-row gt-check-row-once${done ? " gt-check-row-done" : ""}">
@@ -833,7 +1008,7 @@ function renderGoalRow(g, dateKey, doneIds, opts) {
           <span class="gt-checkbox" style="${cbStyle}">${done ? "✓" : ""}</span>
         </button>
         <button class="gt-goal-text-btn" data-action="toggle-comment" data-goal="${g.id}" data-date-key="${dateKey}">
-          <span class="gt-goal-text">${escapeHtml(g.text)}</span>
+          <span class="gt-goal-text">${escapeHtml(g.text)}</span>${bell}
           ${hasComment ? `<span class="gt-comment-dot" title="Har notat"></span>` : ""}
         </button>
         ${extra}
@@ -862,7 +1037,7 @@ function buildDetail() {
     }
     if (onceGoals.length > 0) {
       body += `<p class="gt-section-label">Mål for denne dagen</p>
-      <ul class="gt-goal-list">${onceGoals.map(g => renderGoalRow(g, selectedKey, selectedDoneIds, { showPostpone: true, showDelete: true })).join("")}</ul>`;
+      <ul class="gt-goal-list">${onceGoals.map(g => editingGoalId === g.id ? buildGoalEditPanel(g) : renderGoalRow(g, selectedKey, selectedDoneIds, { showPostpone: true, showDelete: true, showEdit: true })).join("")}</ul>`;
     }
     if (pushedGoals.length > 0) {
       body += `<p class="gt-section-label">Forskjøvet hit fra i går</p>
@@ -888,6 +1063,10 @@ function buildDetail() {
         <input id="new-once-input" placeholder="Engangsmål for denne dagen" />
         <button class="gt-add-btn" data-action="add-once-goal" aria-label="Legg til engangsmål">+</button>
       </div>
+      <label class="gt-notify-check" style="margin-top:8px;">
+        <input type="checkbox" id="new-once-notify" /> 🔔 Varsle meg om dette målet
+      </label>
+      <input type="time" step="300" id="new-once-notify-time" class="gt-account-input" value="${DEFAULT_NOTIFY_TIME}" disabled />
     </div>
   `;
 }
@@ -927,7 +1106,7 @@ function render() {
     appEl.innerHTML = `<div class="gt-loading">Henter mål …</div>`;
     return;
   }
-  appEl.innerHTML = buildHeader() + buildHelp() + buildGridHtml() + buildTodayBar() + buildManage() + buildAccount() + buildDetail() + buildStats();
+  appEl.innerHTML = buildHeader() + buildHelp() + buildGridHtml() + buildTodayBar() + buildManage() + buildAccount() + buildNotifySettings() + buildDetail() + buildStats();
 }
 
 appEl.addEventListener("click", (e) => {
@@ -937,10 +1116,12 @@ appEl.addEventListener("click", (e) => {
   if (action === "prev-month") { viewDate = new Date(viewDate.getFullYear(), viewDate.getMonth() - 1, 1); render(); }
   else if (action === "next-month") { viewDate = new Date(viewDate.getFullYear(), viewDate.getMonth() + 1, 1); render(); }
   else if (action === "toggle-theme") toggleTheme();
-  else if (action === "toggle-help") { showHelp = !showHelp; showManage = false; showAccount = false; render(); }
+  else if (action === "toggle-help") { showHelp = !showHelp; showManage = false; showAccount = false; showNotify = false; render(); }
   else if (action === "select-day") { const [y,m,d] = btn.dataset.date.split("-").map(Number); selectedDate = new Date(y, m-1, d); render(); }
-  else if (action === "toggle-manage") { showManage = !showManage; showAccount = false; showHelp = false; render(); }
-  else if (action === "toggle-account") { showAccount = !showAccount; showManage = false; showHelp = false; accountMessage = ""; accountError = ""; render(); }
+  else if (action === "toggle-manage") { showManage = !showManage; showAccount = false; showHelp = false; showNotify = false; editingGoalId = null; render(); }
+  else if (action === "toggle-account") { showAccount = !showAccount; showManage = false; showHelp = false; showNotify = false; accountMessage = ""; accountError = ""; render(); }
+  else if (action === "toggle-notify") { showNotify = !showNotify; showManage = false; showAccount = false; showHelp = false; notifyPermissionError = ""; render(); }
+  else if (action === "activate-notify") { activateDeviceNotifications(); }
   else if (action === "secure-account") {
     const username = document.getElementById("account-username");
     const password = document.getElementById("account-password");
@@ -953,13 +1134,28 @@ appEl.addEventListener("click", (e) => {
   }
   else if (action === "toggle-goal") toggleGoal(btn.dataset.dateKey, btn.dataset.goal);
   else if (action === "delete-goal") deleteGoal(btn.dataset.goal);
+  else if (action === "edit-goal") startEditGoal(btn.dataset.goal);
+  else if (action === "cancel-goal-edit") cancelEditGoal();
+  else if (action === "save-goal-edit") {
+    const id = btn.dataset.goal;
+    const textInput = document.getElementById("edit-goal-text");
+    const notifyCheckbox = document.getElementById("edit-goal-notify");
+    const timeInput = document.getElementById("edit-goal-notify-time");
+    if (textInput) {
+      saveEditGoal(id, textInput.value, notifyCheckbox ? notifyCheckbox.checked : false, timeInput ? timeInput.value : DEFAULT_NOTIFY_TIME);
+    }
+  }
   else if (action === "add-daily-goal") {
     const input = document.getElementById("new-daily-input");
-    if (input) addDailyGoal(input.value);
+    const notifyCheckbox = document.getElementById("new-daily-notify");
+    const timeInput = document.getElementById("new-daily-notify-time");
+    if (input) addDailyGoal(input.value, notifyCheckbox ? notifyCheckbox.checked : false, timeInput ? timeInput.value : DEFAULT_NOTIFY_TIME);
   }
   else if (action === "add-once-goal") {
     const input = document.getElementById("new-once-input");
-    if (input) addOnceGoal(input.value, toKey(selectedDate));
+    const notifyCheckbox = document.getElementById("new-once-notify");
+    const timeInput = document.getElementById("new-once-notify-time");
+    if (input) addOnceGoal(input.value, toKey(selectedDate), notifyCheckbox ? notifyCheckbox.checked : false, timeInput ? timeInput.value : DEFAULT_NOTIFY_TIME);
   }
   else if (action === "toggle-weekday") {
     const day = Number(btn.dataset.day);
@@ -1006,11 +1202,32 @@ appEl.addEventListener("focusout", (e) => {
 appEl.addEventListener("keydown", (e) => {
   if (e.key !== "Enter") return;
   if (e.target.tagName === "TEXTAREA") return;
-  if (e.target.id === "new-daily-input") addDailyGoal(e.target.value);
-  else if (e.target.id === "new-once-input") addOnceGoal(e.target.value, toKey(selectedDate));
+  if (e.target.id === "new-daily-input") {
+    const notifyCheckbox = document.getElementById("new-daily-notify");
+    const timeInput = document.getElementById("new-daily-notify-time");
+    addDailyGoal(e.target.value, notifyCheckbox ? notifyCheckbox.checked : false, timeInput ? timeInput.value : DEFAULT_NOTIFY_TIME);
+  } else if (e.target.id === "new-once-input") {
+    const notifyCheckbox = document.getElementById("new-once-notify");
+    const timeInput = document.getElementById("new-once-notify-time");
+    addOnceGoal(e.target.value, toKey(selectedDate), notifyCheckbox ? notifyCheckbox.checked : false, timeInput ? timeInput.value : DEFAULT_NOTIFY_TIME);
+  }
+});
+
+appEl.addEventListener("change", (e) => {
+  if (e.target.id === "new-daily-notify") {
+    const t = document.getElementById("new-daily-notify-time");
+    if (t) t.disabled = !e.target.checked;
+  } else if (e.target.id === "new-once-notify") {
+    const t = document.getElementById("new-once-notify-time");
+    if (t) t.disabled = !e.target.checked;
+  } else if (e.target.id === "edit-goal-notify") {
+    const t = document.getElementById("edit-goal-notify-time");
+    if (t) t.disabled = !e.target.checked;
+  }
 });
 
 render();
+bindForegroundMessaging();
 </script>
 </body>
 </html>
