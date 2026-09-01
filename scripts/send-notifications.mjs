@@ -7,7 +7,8 @@ import admin from "firebase-admin";
 const raw = process.env.FIREBASE_SERVICE_ACCOUNT;
 if (!raw) {
   console.error("Mangler FIREBASE_SERVICE_ACCOUNT (GitHub secret).");
-  process.exit(1);
+  process.exitCode = 1;
+  throw new Error("Mangler FIREBASE_SERVICE_ACCOUNT");
 }
 
 const serviceAccount = JSON.parse(raw);
@@ -65,9 +66,12 @@ async function main() {
   }
 }
 
-main()
-  .then(() => process.exit(0))
-  .catch((err) => {
-    console.error(err);
-    process.exit(1);
-  });
+main().catch((err) => {
+  console.error(err);
+  process.exitCode = 1;
+});
+// Merk: bevisst INGEN process.exit() her. I GitHub Actions er stdout en
+// "pipe", ikke en terminal, og skriving dit skjer asynkront – et eksplisitt
+// process.exit() rett etter siste console.log kan kutte prosessen før
+// utskriften faktisk er flushet til loggen. Ved å la Node avslutte naturlig
+// (og bruke process.exitCode i stedet) får all utskrift tid til å komme med.
