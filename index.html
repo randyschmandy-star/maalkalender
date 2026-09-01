@@ -840,7 +840,7 @@ function buildTodayBar() {
   const streak = computeStreak();
   return `
     <div class="gt-today-bar">
-      <span>I dag: <strong>${done} av ${total}</strong> mål</span>
+      <span><strong>${done} av ${total}</strong> mål</span>
       <span class="gt-streak">🔥 ${streak} ${streak === 1 ? "dag" : "dager"}</span>
       <div class="gt-today-actions">
         <button class="gt-link-btn" data-action="toggle-manage">${showManage ? "Lukk" : "Rediger mål"}</button>
