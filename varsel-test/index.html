@@ -1,0 +1,265 @@
+<!DOCTYPE html>
+<html lang="no">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Varsel-test</title>
+<style>
+@import url('https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,400;9..144,500;9..144,600&family=Inter:wght@400;500;600;700&display=swap');
+
+* { box-sizing: border-box; }
+html { background: #EEF1EC; }
+body {
+  margin: 0;
+  min-height: 100vh;
+  display: flex;
+  justify-content: center;
+  padding: 24px 12px;
+  font-family: 'Inter', sans-serif;
+}
+.vt-root {
+  --bg: #F2F4EE;
+  --surface: #FFFFFF;
+  --ink: #23312A;
+  --muted: #7E8C85;
+  --line: #DCE3DA;
+  --accent: #3F6B54;
+  --accent-soft: #DCE9E1;
+  --warm: #C97A46;
+  color: var(--ink);
+  background: var(--bg);
+  padding: 20px 18px 26px;
+  border-radius: 16px;
+  max-width: 420px;
+  width: 100%;
+}
+.vt-title {
+  font-family: 'Fraunces', serif;
+  font-weight: 500;
+  font-size: 20px;
+  margin: 0 0 4px;
+}
+.vt-sub {
+  font-size: 13px;
+  color: var(--muted);
+  margin: 0 0 18px;
+  line-height: 1.4;
+}
+.vt-card {
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  padding: 14px;
+  margin-bottom: 12px;
+}
+.vt-label { font-size: 12px; color: var(--muted); margin: 0 0 8px; }
+.vt-status {
+  font-size: 14px;
+  margin: 0 0 4px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.vt-dot {
+  width: 8px; height: 8px; border-radius: 50%;
+  background: var(--muted); flex-shrink: 0;
+}
+.vt-dot-ok { background: var(--accent); }
+.vt-dot-off { background: var(--warm); }
+.vt-btn {
+  width: 100%; height: 40px; border-radius: 8px;
+  font-size: 14px; font-weight: 600;
+  background: var(--accent); color: white; border: none;
+  cursor: pointer; font-family: 'Inter', sans-serif;
+  margin-bottom: 8px;
+}
+.vt-btn:disabled { opacity: 0.5; cursor: default; }
+.vt-btn-secondary {
+  background: var(--surface); color: var(--ink); border: 1px solid var(--line);
+}
+.vt-select {
+  width: 100%; font-size: 14px; padding: 9px 10px;
+  border: 1px solid var(--line); border-radius: 8px;
+  font-family: 'Inter', sans-serif; background: var(--bg);
+  color: var(--ink); margin-bottom: 8px;
+}
+.vt-input {
+  width: 100%; font-size: 14px; padding: 9px 10px;
+  border: 1px solid var(--line); border-radius: 8px;
+  font-family: 'Inter', sans-serif; background: var(--bg);
+  color: var(--ink); margin-bottom: 8px;
+}
+.vt-msg { font-size: 13px; margin: 4px 0 0; }
+.vt-msg-error { color: var(--warm); }
+.vt-msg-ok { color: var(--accent); }
+.vt-hint { font-size: 11px; color: var(--muted); margin: 10px 0 0; line-height: 1.4; }
+</style>
+</head>
+<body>
+<div id="app" class="vt-root"></div>
+
+<script type="module">
+import { initializeApp } from "https://www.gstatic.com/firebasejs/10.13.0/firebase-app.js";
+import { getFirestore, doc, onSnapshot, setDoc } from "https://www.gstatic.com/firebasejs/10.13.0/firebase-firestore.js";
+import { getAuth, signInAnonymously, onAuthStateChanged } from "https://www.gstatic.com/firebasejs/10.13.0/firebase-auth.js";
+import { getMessaging, getToken } from "https://www.gstatic.com/firebasejs/10.13.0/firebase-messaging.js";
+
+// Samme Firebase-prosjekt som målkalenderen (maalkalender)
+const firebaseConfig = {
+  apiKey: "AIzaSyANIgaq9pbu9LABCUS1gXxvVWHt8gqSjAI",
+  authDomain: "maalkalender.firebaseapp.com",
+  projectId: "maalkalender",
+  storageBucket: "maalkalender.firebasestorage.app",
+  messagingSenderId: "1086811554153",
+  appId: "1:1086811554153:web:8529ec52c19261217dbdf8"
+};
+
+// VIKTIG: lim inn din egen VAPID-nøkkel her (Firebase Console -> Prosjektinnstillinger
+// -> Cloud Messaging -> Web Push-sertifikater -> "Generer nøkkelpar")
+const VAPID_KEY = "BLPSLb3XYj6dT9MGTDR_SqzRd_a346elkWc5zhY1j_28-IkVb0sFAfOM80FVq_Y-QJ72SnEJK02azKb5TGj5yvo";
+
+const COLLECTION = "notifyTests";
+
+const fbApp = initializeApp(firebaseConfig);
+const db = getFirestore(fbApp);
+const auth = getAuth(fbApp);
+
+let uid = null;
+let docData = null;
+let unsubscribeSnapshot = null;
+let busy = false;
+let message = { text: "", type: "" };
+
+const appEl = document.getElementById("app");
+
+onAuthStateChanged(auth, (user) => {
+  if (user) {
+    uid = user.uid;
+    startListener();
+  } else {
+    signInAnonymously(auth).catch((err) => {
+      message = { text: "Kunne ikke logge inn: " + err.message, type: "error" };
+      render();
+    });
+  }
+});
+
+function startListener() {
+  if (unsubscribeSnapshot) unsubscribeSnapshot();
+  const ref = doc(db, COLLECTION, uid);
+  unsubscribeSnapshot = onSnapshot(ref, (snap) => {
+    docData = snap.exists() ? snap.data() : null;
+    render();
+  });
+}
+
+function permissionState() {
+  if (!("Notification" in window)) return "unsupported";
+  return Notification.permission; // "default" | "granted" | "denied"
+}
+
+async function activate(intervalMinutes) {
+  busy = true; message = { text: "", type: "" }; render();
+  try {
+    if (!("serviceWorker" in navigator)) throw new Error("Nettleseren støtter ikke service workers.");
+    if (!("Notification" in window)) throw new Error("Nettleseren støtter ikke varsler.");
+
+    const permission = await Notification.requestPermission();
+    if (permission !== "granted") throw new Error("Du må gi tillatelse til varsler for at dette skal fungere.");
+
+    const registration = await navigator.serviceWorker.register("firebase-messaging-sw.js");
+    const messaging = getMessaging(fbApp);
+    const token = await getToken(messaging, {
+      vapidKey: VAPID_KEY,
+      serviceWorkerRegistration: registration,
+    });
+    if (!token) throw new Error("Fikk ingen token fra Firebase Cloud Messaging.");
+
+    await setDoc(doc(db, COLLECTION, uid), {
+      token,
+      intervalMinutes,
+      enabled: true,
+      lastSent: null,
+      updatedAt: Date.now(),
+    });
+
+    message = { text: "Aktivert! Varsler sendes fra GitHub Actions ca. hvert " + intervalMinutes + ". minutt.", type: "ok" };
+  } catch (err) {
+    message = { text: err.message || String(err), type: "error" };
+  }
+  busy = false;
+  render();
+}
+
+async function deactivate() {
+  if (!uid) return;
+  busy = true; render();
+  try {
+    await setDoc(doc(db, COLLECTION, uid), { enabled: false }, { merge: true });
+    message = { text: "Varsler slått av.", type: "ok" };
+  } catch (err) {
+    message = { text: err.message || String(err), type: "error" };
+  }
+  busy = false;
+  render();
+}
+
+function formatTime(ms) {
+  if (!ms) return "aldri";
+  const d = new Date(ms);
+  return d.toLocaleString("no-NO");
+}
+
+function render() {
+  const perm = permissionState();
+  const isEnabled = docData && docData.enabled;
+
+  appEl.innerHTML = `
+    <p class="vt-title">Varsel-eksperiment</p>
+    <p class="vt-sub">Test av periodiske push-varsler (samme Firebase-prosjekt som målkalenderen), for å se om dette kan bygges inn der senere.</p>
+
+    <div class="vt-card">
+      <p class="vt-label">Status</p>
+      <p class="vt-status"><span class="vt-dot ${perm === 'granted' ? 'vt-dot-ok' : 'vt-dot-off'}"></span> Varseltillatelse: ${perm}</p>
+      <p class="vt-status"><span class="vt-dot ${isEnabled ? 'vt-dot-ok' : 'vt-dot-off'}"></span> Abonnement: ${isEnabled ? 'aktivt (hvert ' + docData.intervalMinutes + '. min)' : 'av'}</p>
+      ${docData ? `<p class="vt-status" style="color:var(--muted); font-size:12px;">Sist sendt: ${formatTime(docData.lastSent)}</p>` : ""}
+    </div>
+
+    <div class="vt-card">
+      <p class="vt-label">Velg intervall</p>
+      <select id="interval-select" class="vt-select">
+        <option value="10">Hvert 10. minutt</option>
+        <option value="60" selected>Hver time</option>
+        <option value="180">Hver 3. time</option>
+        <option value="custom">Egendefinert (minutter)</option>
+      </select>
+      <input id="custom-interval" class="vt-input" type="number" min="1" placeholder="Antall minutter" style="display:none;" />
+      <button id="activate-btn" class="vt-btn" ${busy ? "disabled" : ""}>${busy ? "Jobber …" : "Be om tillatelse og aktiver"}</button>
+      <button id="deactivate-btn" class="vt-btn vt-btn-secondary" ${busy || !isEnabled ? "disabled" : ""}>Slå av</button>
+      ${message.text ? `<p class="vt-msg ${message.type === 'error' ? 'vt-msg-error' : 'vt-msg-ok'}">${message.text}</p>` : ""}
+      <p class="vt-hint">Varselet sendes av en planlagt GitHub Actions-jobb, ikke av denne nettsiden – så det fungerer selv om fanen/appen er lukket. Bruk "Run workflow" i GitHub Actions for å teste med én gang, i stedet for å vente på tidsplanen.</p>
+    </div>
+  `;
+
+  document.getElementById("interval-select").addEventListener("change", (e) => {
+    document.getElementById("custom-interval").style.display = e.target.value === "custom" ? "block" : "none";
+  });
+  document.getElementById("activate-btn").addEventListener("click", () => {
+    const select = document.getElementById("interval-select");
+    let minutes = select.value === "custom"
+      ? Number(document.getElementById("custom-interval").value)
+      : Number(select.value);
+    if (!minutes || minutes < 1) {
+      message = { text: "Skriv inn et gyldig antall minutter.", type: "error" };
+      render();
+      return;
+    }
+    activate(minutes);
+  });
+  document.getElementById("deactivate-btn").addEventListener("click", deactivate);
+}
+
+render();
+</script>
+</body>
+</html>
